@@ -185,6 +185,7 @@ void writeNrfReg(uint8_t reg, uint8_t data);
 void writeNrfData(uint8_t data);
 void readNrfReg(uint8_t reg, uint8_t *data);
 void readNrfData(uint8_t *data);
+void nrf24l0PowerUp();
 
 //Slot management
 uint32_t getMySlot(uint8_t devno);

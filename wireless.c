@@ -409,7 +409,7 @@ void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
     writeNrfData(R_RX_PAYLOAD);
 
     while(i<payloadlength){
-        readNrfData(&Rxpacket[Rx_index + payloadlength -1]); // Convert from big endian to little endian
+        readNrfData(&Rxpacket[Rx_index]); // Convert from big endian to little endian
         Rx_index = (Rx_index +1)%DATA_MAX_SIZE;
         ++i;
     }
@@ -473,6 +473,9 @@ bool nrf24l0RxStatus()
     }
     else
     {
+        //clear RX_DR bit
+        readNrfReg(R_REGISTER|STATUS,&data);
+        writeNrfReg(R_REGISTER|STATUS,(data & ~0x40));
         return true;
     }
 }
@@ -659,7 +662,7 @@ void nrf24l0RxMsg(callback fn)
 
 
     if(isNrf24l0DataAvailable()) {
-        togglePinValue(JOIN_LED);
+        //togglePinValue(JOIN_LED);
 
         getnrf24l01DataPacket();
         parsenrf24l01DataPacket(); // set flags if syn message or startcode or
