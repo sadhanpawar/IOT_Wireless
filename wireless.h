@@ -59,26 +59,20 @@
 
 
 //Slot Management Macros
-//#define GUARD_TIMER (60u)
-//
-//#define SYNC_SLOT   (0)
-//#define DL_SLOT     (60u) + GUARD_TIMER
-//#define FACK_SLOT   (21000u) + DL_SLOT+ GUARD_TIMER
-//#define ACCESS_SLOT (100u) + FACK_SLOT + GUARD_TIMER
-//#define UL0_SLOT    (110u) + ACCESS_SLOT + GUARD_TIMER
-//#define UL1_SLOT    (21000u) + UL0_SLOT + GUARD_TIMER
 
-#define GUARD_TIMER (1u) // minimum is 1 ms
+#define GUARD_TIMER         (1u) // minimum is 1 ms
+#define TX_RX_DELAY         (200) //used by waitMicroseconds
+#define TX_RX_DELAY_SLOT    (0.2) //milliseconds
+#define _32BYTE_PACKETS     (47) // 1500/32 , 32 byte packets
 
 #define SYNC_SLOT   (0)
 #define DL_SLOT     (2) + GUARD_TIMER
-#define FACK_SLOT   (22) + DL_SLOT+ GUARD_TIMER
+#define FACK_SLOT   (15) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + DL_SLOT+ GUARD_TIMER
 #define ACCESS_SLOT (2) + FACK_SLOT + GUARD_TIMER
 #define UL0_SLOT    (2) + ACCESS_SLOT + GUARD_TIMER
-#define UL1_SLOT    (22) + UL0_SLOT + GUARD_TIMER
+#define UL1_SLOT    (15) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + UL0_SLOT + GUARD_TIMER
 
 
-#define TX_RX_DELAY (130 + 70) //microseconds
 
 //Extern variables
 
@@ -88,7 +82,7 @@ extern bool nrfJoinEnabled;
 extern bool nrfJoinEnabled_BR;
 
 // Declare external variables for syncMsg, startCode, myMac
-extern uint8_t syncMsg[6];
+extern uint8_t syncMsg[7];
 extern uint8_t startCode[2];
 extern uint8_t myMac[6];
 

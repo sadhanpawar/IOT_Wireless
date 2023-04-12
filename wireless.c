@@ -16,7 +16,7 @@ bool nrfSyncEnabled = false;
 bool nrfJoinEnabled = false;
 bool nrfJoinEnabled_BR = false;
 
-uint8_t syncMsg[6] = {0x55,0xAA,0x55,0xAA,0x55};
+uint8_t syncMsg[7] = {0x55,0xAA,0x55,0xAA,0x55};
 uint8_t startCode[2] = {0xFE, 0xFE};
 uint8_t myMac[6] = {75,78,1,2,3,4};
 
@@ -102,7 +102,7 @@ void nrf24l0ChipInit()
     setPinValue(CE_GPIO, 0);
     disableNrfCs();
 
-    waitMicrosecond(5000);
+    waitMicrosecond(5000);          // Wait for the nrf module to settle
 
     data = 0x00;                    // Interrupts off,no CRC, PWR_UP, Def Rx mode
     writeNrfReg(W_REGISTER|CONFIG,data );
@@ -141,11 +141,6 @@ void nrf24l0ChipInit()
     data = 0x01;                    // 3byte Rx/Tx address width
     writeNrfReg(W_REGISTER|SETUP_AW,data );
 */
-
-
-
-
-
 
 /*
     uint32_t pipeaddr = 0xAFAFAF;                    // Address for rx pipes
@@ -326,8 +321,7 @@ void enableSync_BR()
 void enableJoin_DEV()
 {
     if(!getPinValue(JOIN_BUTTON)){ // wait for button press
-    nrfJoinEnabled = true;
-    setPinValue(JOIN_LED,1);
+        nrfJoinEnabled = true;
     }
 }
 
@@ -335,6 +329,7 @@ void enableJoin_BR()
 {
     if(!getPinValue(JOIN_BUTTON)){ // wait for button press
         nrfJoinEnabled_BR = true;
+        setPinValue(JOIN_LED,1);
     }
 }
 
@@ -365,7 +360,7 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
     writeNrfData(W_TX_PAYLOAD_NO_ACK);
 
     //Write data byte by byte
-    for(i = (size- 1), j =0; i >= 0;i--, j++) {
+    for(i = 0, j =0; i < size ;i++, j++) {
 
         if( (j != 0 ) && (j % 32) == 0 ) {
             nrf24l0PulseCE();
@@ -409,7 +404,7 @@ void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
     writeNrfData(R_RX_PAYLOAD);
 
     while(i<payloadlength){
-        readNrfData(&Rxpacket[Rx_index]); // Convert from big endian to little endian
+        readNrfData(&Rxpacket[Rx_index]);
         Rx_index = (Rx_index +1)%DATA_MAX_SIZE;
         ++i;
     }
@@ -422,7 +417,7 @@ void parsenrf24l01DataPacket(){
 
     uint8_t deviceNum = 0;
 
-    if(strncmp((char*)Rxpacket, (char*)syncMsg, sizeof(syncMsg) -1) == 0){ // check sync. Last byte for frame count is omitted
+    if(strncmp((char*)Rxpacket, (char*)syncMsg, sizeof(syncMsg) -2) == 0){ // check sync. Last byte for frame count is omitted
         isSync = true;
     }
     else{
@@ -466,16 +461,12 @@ bool nrf24l0RxStatus()
 {
     uint8_t data = 0;
     readNrfReg(R_REGISTER|FIFO_STATUS,&data);
-    if( ((data & 0x0E) == 0x0E) || ((data & 0x0E) == 0x0C)
-       )
-    {
+    if(((data & 0x0E) == 0x0E) || ((data & 0x0E) == 0x0C)){ // check for the data pipe in RX_P_NO in FIFO_STATUS
         return false;
     }
-    else
-    {
-        //clear RX_DR bit
-        readNrfReg(R_REGISTER|STATUS,&data);
-        writeNrfReg(R_REGISTER|STATUS,(data & ~0x40));
+    else{
+        readNrfReg(R_REGISTER|STATUS,&data); // Read status register to check RX_DR
+        writeNrfReg(R_REGISTER|STATUS,(data & ~0x40)); // Set the RX_DR bit to clear the interrupt
         return true;
     }
 }
@@ -489,9 +480,9 @@ void nrf24l0PowerUp()
 
     if(!(data & 0x02)) {
         writeNrfReg(W_REGISTER|CONFIG, data | 0x02);
+        waitMicrosecond(5000); // Wait 5 ms for checking that data write is complete
     }
 
-    waitMicrosecond(5000); // Wait 5 ms for checking that data write is complete
 }
 
 bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
@@ -550,7 +541,8 @@ void nrf24l0TxSync()
     if(nrfSyncEnabled)
     {
 
-        syncMsg[sizeof(syncMsg) -1] = syncFrameCount; // Frame count
+        syncMsg[sizeof(syncMsg) -2] = (uint8_t)((syncFrameCount >> 8) & (0xFF)) ; // Frame count
+        syncMsg[sizeof(syncMsg) -1] = (uint8_t)((syncFrameCount & 0xFF)); // Frame count
         putNrf24l0DataPacket(syncMsg, sizeof(syncMsg));                                                         /*send sync message*/
         nrfSyncEnabled = false;
         ++syncFrameCount;
@@ -607,6 +599,7 @@ void nrf24l0TxJoinResp_BR()
     txTimeStatus = false;
     nrfJoinEnabled_BR = false;
     sendJoinResponse_BR = false;
+    setPinValue(JOIN_LED,0);
 
 }
 
@@ -662,7 +655,6 @@ void nrf24l0RxMsg(callback fn)
 
 
     if(isNrf24l0DataAvailable()) {
-        //togglePinValue(JOIN_LED);
 
         getnrf24l01DataPacket();
         parsenrf24l01DataPacket(); // set flags if syn message or startcode or
@@ -829,7 +821,6 @@ int main()
 }
 */
 
-
 int main()
 {
     initSystemClockTo40Mhz();
@@ -850,6 +841,7 @@ int main()
         {
             if(nrfJoinEnabled && acessSlotStart_dev){
                 nrf24l0TxJoinReq_DEV();
+                setPinValue(JOIN_LED,1);
                 }
             else{
                 if(appSendFlag){
@@ -860,7 +852,6 @@ int main()
         }
     }
 }
-
 
 
 
