@@ -41,13 +41,14 @@
 #define FEATURE     0x1D
 
 //SPI Commands
-#define R_REGISTER      (0x00)
-#define W_REGISTER      (0x20)
-#define R_RX_PAYLOAD    (0x61)
-#define W_TX_PAYLOAD    (0xA0)
-#define FLUSH_TX        (0xE1)
-#define FLUSH_RX        (0xE2)
-#define R_RX_PL_WID     (0x60)
+#define R_REGISTER          (0x00)
+#define W_REGISTER          (0x20)
+#define R_RX_PAYLOAD        (0x61)
+#define W_TX_PAYLOAD        (0xA0)
+#define W_TX_PAYLOAD_NO_ACK (0xB0)
+#define FLUSH_TX            (0xE1)
+#define FLUSH_RX            (0xE2)
+#define R_RX_PL_WID         (0x60)
 
 
 //Wireless PINS
@@ -77,6 +78,7 @@
 #define UL1_SLOT    (22) + UL0_SLOT + GUARD_TIMER
 
 
+#define TX_RX_DELAY (130 + 70) //microseconds
 
 //Extern variables
 

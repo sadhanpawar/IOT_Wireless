@@ -74,7 +74,7 @@ void nrf24l0Init()
     selectPinPushPullOutput(CE_GPIO);
 
     setPinValue(CE_GPIO,1); // init always in Rx mode so that isnrfDataAvailable checks for available data
-    waitMicrosecond(130);
+    waitMicrosecond(TX_RX_DELAY);
 
     // SPI1 Initialization
     initSpi1(USE_SSI_RX);
@@ -96,36 +96,58 @@ void nrf24l0Init()
 
 void nrf24l0ChipInit()
 {
+    uint8_t data =0;
 
     //configure the module
-    uint8_t data =0;
-    data = 0x03;                    // Interrupts off,no CRC, PWR_UP, Def Rx mode
+    setPinValue(CE_GPIO, 0);
+    disableNrfCs();
+
+    waitMicrosecond(5000);
+
+    data = 0x00;                    // Interrupts off,no CRC, PWR_UP, Def Rx mode
     writeNrfReg(W_REGISTER|CONFIG,data );
-
-    waitMicrosecond(1500); // Wait 1.5 ms for PWRUP
-
-    data = 0x00;                    // Turn off auto ACKs
-    writeNrfReg(W_REGISTER|EN_AA,data );
-
-    /*
-    data = 0x03;                    // Turn on default(P0,P1) Rx Pipes
-    writeNrfReg(W_REGISTER|EN_RXADDR,data );
-
-
-    data = 0x03;                    // 5byte Rx/Tx address width
-    writeNrfReg(W_REGISTER|SETUP_AW,data );
-    */
 
     data = 0x00;                    // Turn off retransmission   /*Check for using retransmission later*/
     writeNrfReg(W_REGISTER|SETUP_RETR,data );
 
-    data = 0x01;                    // Set RF channel to be 2400 + 1(data) mhz
-    writeNrfReg(W_REGISTER|RF_CH,data );
-
     data = 0x01;                    // RF data rate to 1Mbps / 1 Mhz and power is -12 dbm with 7.5 mA consumption (medium power consumption)
     writeNrfReg(W_REGISTER|RF_SETUP,data );
 
-    /*
+    data = 0x05;                                // enable dynamic payloads, enable Tx_payload, NO_ACK
+    writeNrfReg(W_REGISTER|FEATURE,data );
+
+    data = 0x3F;                                // Configure dynamic payload lengths for all data pipes
+    writeNrfReg(W_REGISTER|DYNPD,data );
+
+    data = 0x70;
+    writeNrfReg(W_REGISTER|STATUS, data);
+
+    data = 0x01;                    // Set RF channel to be 2400 + 1(data) mhz
+    writeNrfReg(W_REGISTER|RF_CH,data );
+
+    //data = 0x03;                    // Interrupts off,no CRC, PWR_UP, Def Rx mode
+    //writeNrfReg(W_REGISTER|CONFIG,data );
+
+    //waitMicrosecond(1500); // Wait 1.5 ms for PWRUP
+
+    data = 0x00;                    // Turn off auto ACKs
+    writeNrfReg(W_REGISTER|EN_AA,data );
+
+/*// Turn on default Rx pipes
+    data = 0x03;
+    writeNrfReg(W_REGISTER|EN_RXADDR,data );
+
+
+    data = 0x01;                    // 3byte Rx/Tx address width
+    writeNrfReg(W_REGISTER|SETUP_AW,data );
+*/
+
+
+
+
+
+
+/*
     uint32_t pipeaddr = 0xAFAFAF;                    // Address for rx pipes
 
     enableNrfCs();
@@ -155,19 +177,22 @@ void nrf24l0ChipInit()
     writeSpi1Data(pipeaddr);
     readSpi1Data();
     disableNrfCs();
+
     */
 
-    data = 0x05;                    // enable dynamic payloads, enable Tx_payload, NO_ACK
-    writeNrfReg(W_REGISTER|FEATURE,data );
 
-    data = 0x3F;                    // Configure dynamic payload lengths for all data pipes
-    writeNrfReg(W_REGISTER|DYNPD,data );
 
-    //Flush Tx and Rx
-    //writeNrfData(W_REGISTER|FLUSH_RX);
-    //writeNrfData(W_REGISTER|FLUSH_TX);
+    enableNrfCs();                              // Flush Tx FIFO after sending a SYNC
+    writeSpi1Data(W_REGISTER|FLUSH_TX);
+    readSpi1Data();
+    disableNrfCs();
 
-    waitMicrosecond(1500); // Wait 1.5 ms for checking that data write is complete
+    enableNrfCs();                              // Flush Tx FIFO after sending a SYNC
+    writeSpi1Data(W_REGISTER|FLUSH_RX);
+    readSpi1Data();
+    disableNrfCs();
+
+    nrf24l0PowerUp();
 
 }
 //----------------------------------------------------
@@ -262,8 +287,6 @@ void writeNrfReg(uint8_t reg, uint8_t data)
     writeSpi1Data(data);
     readSpi1Data();
     disableNrfCs();
-
-    waitMicrosecond(100);
 }
 
 void writeNrfData(uint8_t data)
@@ -282,8 +305,6 @@ void readNrfReg(uint8_t reg, uint8_t *data)
     writeSpi1Data(0);
     *data = readSpi1Data();
     disableNrfCs();
-
-    waitMicrosecond(100);
 }
 
 void readNrfData(uint8_t *data)
@@ -323,9 +344,9 @@ void enableJoin_BR()
 
 void nrf24l0PulseCE(){
 
-    setPinValue(CE_GPIO,0);
-    waitMicrosecond(15);
     setPinValue(CE_GPIO,1);
+    waitMicrosecond(15);
+    setPinValue(CE_GPIO,0);
 
 }
 
@@ -336,64 +357,60 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
 
     // go to standby 1 mode
     setPinValue(CE_GPIO,0);
-    _delay_cycles(4);
-
-//    //CE enable to tx mode
-    setPinValue(CE_GPIO,1);
+    waitMicrosecond(TX_RX_DELAY);
 
     // Tx mode setting
     writeNrfReg(W_REGISTER|CONFIG,0x02); // CRC disabled, PWRUP, Prim_rx =0
     enableNrfCs(); // Frame begins
-    writeNrfData(W_TX_PAYLOAD);
+    writeNrfData(W_TX_PAYLOAD_NO_ACK);
 
     //Write data byte by byte
     for(i = (size- 1), j =0; i >= 0;i--, j++) {
 
         if( (j != 0 ) && (j % 32) == 0 ) {
+            nrf24l0PulseCE();
             while(true != nrf24l0TxStatus()); //for every 32 bytes high to low transition //
             writeNrfReg(W_REGISTER|STATUS,0x20);
             disableNrfCs();
-            waitMicrosecond(130); // ? add more delay ?? based on packet size
-            //while(true != nrf24l0TxStatus());
-            //writeNrfReg(W_REGISTER|STATUS,0x20); //clear the interrupt TX_DS bit //
+            waitMicrosecond(TX_RX_DELAY); // ? add more delay ?? based on packet size
             enableNrfCs();
-            writeNrfData(W_TX_PAYLOAD);
+            writeNrfData(W_TX_PAYLOAD_NO_ACK);
         }
         writeNrfData(data[i]);
     }
     disableNrfCs(); // Frame ends
-    waitMicrosecond(130);
+
+    nrf24l0PulseCE();
+
+    waitMicrosecond(TX_RX_DELAY);
 
     // poll till data is transmitted
     while(true != nrf24l0TxStatus());
     writeNrfReg(W_REGISTER|STATUS,0x20); // clear the TX bit
 
-    nrf24l0PulseCE();
-    // go to rx mode
-    writeNrfReg(W_REGISTER|CONFIG,0x03);
-    waitMicrosecond(130);
+
+    //writeNrfReg(W_REGISTER|CONFIG,0x03);    // go to rx mode, prim_rx=1, pwrup
+    //waitMicrosecond(TX_RX_DELAY);                   // Rx setting
+
 }
 
 void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
 
     int i=0;
     uint8_t payloadlength =32;
-
-    /*CE enable to Rx mode*/
+    //CE enable to Rx mode//
     setPinValue(CE_GPIO,1);
-     // Rx mode
     writeNrfReg(W_REGISTER|CONFIG,0x03); // CRC disabled, PWRUP, Prim_Rx =1
-    waitMicrosecond(130);
-
+    waitMicrosecond(TX_RX_DELAY);
     readNrfReg(R_REGISTER|R_RX_PL_WID, &payloadlength); // get the payload length of Rx packet
+
 
     enableNrfCs();                      // Frame begins
     writeNrfData(R_RX_PAYLOAD);
 
     while(i<payloadlength){
-        readNrfData(&Rxpacket[payloadlength + Rx_index - 1]);
-        Rx_index++;
-        Rx_index %= DATA_MAX_SIZE;
+        readNrfData(&Rxpacket[Rx_index + payloadlength -1]); // Convert from big endian to little endian
+        Rx_index = (Rx_index +1)%DATA_MAX_SIZE;
         ++i;
     }
     disableNrfCs();                     // Frame ends
@@ -448,13 +465,48 @@ bool nrf24l0TxStatus()
 bool nrf24l0RxStatus()
 {
     uint8_t data = 0;
-    readNrfReg(R_REGISTER|STATUS,&data);
-    return ((data & 0x40) >> 6); // bit 6 is Rx_DR fifo status
+    readNrfReg(R_REGISTER|FIFO_STATUS,&data);
+    if( ((data & 0x0E) == 0x0E) || ((data & 0x0E) == 0x0C)
+       )
+    {
+        return false;
+    }
+    else
+    {
+        return true;
+    }
 }
 
+void nrf24l0PowerUp()
+{
+    uint8_t data;
+
+    data = 0;
+    readNrfReg(R_REGISTER|CONFIG, &data);
+
+    if(!(data & 0x02)) {
+        writeNrfReg(W_REGISTER|CONFIG, data | 0x02);
+    }
+
+    waitMicrosecond(5000); // Wait 5 ms for checking that data write is complete
+}
 
 bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
 {
+    uint8_t data = 0;
+
+    nrf24l0PowerUp();
+
+    readNrfReg(R_REGISTER|CONFIG, &data);
+    writeNrfReg(W_REGISTER|CONFIG, data | 0x1);
+
+    data = 0x70;
+    writeNrfReg(W_REGISTER|STATUS, data);
+
+    setPinValue(CE_GPIO,1);
+
+    waitMicrosecond(TX_RX_DELAY);
+
     if(nrf24l0RxStatus()){
         writeNrfReg(W_REGISTER|STATUS,0x40); // Clear the Rx interrupt
         return true;
@@ -494,11 +546,6 @@ void nrf24l0TxSync()
 {
     if(nrfSyncEnabled)
     {
-//
-//        enableNrfCs();                              // Flush Tx FIFO after sending a SYNC
-//        writeSpi1Data(W_REGISTER|FLUSH_TX);
-//        readSpi1Data();
-//        disableNrfCs();
 
         syncMsg[sizeof(syncMsg) -1] = syncFrameCount; // Frame count
         putNrf24l0DataPacket(syncMsg, sizeof(syncMsg));                                                         /*send sync message*/
@@ -507,6 +554,7 @@ void nrf24l0TxSync()
         uint32_t mySlotTemp = getMySlot(readEeprom(NO_OF_DEV_IN_BRIDGE));
         startPeriodicTimer_ms(syncSlot_BR, mySlotTemp);
         downlinkSlotStart_br = true;
+       // setPinValue(SYNC_LED, 1);
     }
 }
 
@@ -611,7 +659,6 @@ void nrf24l0RxMsg(callback fn)
 
 
     if(isNrf24l0DataAvailable()) {
-
         togglePinValue(JOIN_LED);
 
         getnrf24l01DataPacket();
@@ -745,6 +792,7 @@ int main()
     initSystemClockTo40Mhz();
     initEeprom();
     nrf24l0Init();
+    // Flush Rx for device and bridge
     uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
     enableSync_BR();
 
@@ -788,13 +836,10 @@ int main()
 
     while(true)
         {
-        readNrfReg(R_REGISTER|FIFO_STATUS,&fifoStatus);
-        enableNrfCs();
-
-
     //Device functions
         enableJoin_DEV();
     //Common functions
+        readNrfReg(R_REGISTER|FIFO_STATUS,&fifoStatus);
         nrf24l0RxMsg(dataReceived);
 
         //check for slot no
@@ -812,5 +857,7 @@ int main()
         }
     }
 }
+
+
 
 
