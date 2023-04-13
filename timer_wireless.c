@@ -109,8 +109,10 @@ bool stopTimer_ms(_callback_wr callback)
      while (i < NUM_TIMERS_WR && !found)
      {
          found = fn_wr[i] == callback;
-         if (found)
+         if (found) {
              ticks_wr[i] = 0;
+             fn_wr[i] = 0;
+         }
          i++;
      }
      return found;

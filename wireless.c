@@ -2,14 +2,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
+#include <inttypes.h>
 #include "tm4c123gh6pm.h"
 #include "clock.h"
 #include "wait.h"
 #include "gpio.h"
-#include "wireless.h"
 #include "timer_wireless.h"
 #include "spi1.h"
 #include "eeprom.h"
+#include "uart0.h"
+#include "wireless.h"
 
 
 bool nrfSyncEnabled = false;
@@ -27,7 +30,10 @@ uint16_t packetLength =0;
 uint8_t allocatedDevNum =0;
 
 uint8_t Rxpacket[DATA_MAX_SIZE] = {0};
-uint16_t Rx_index =0;
+uint16_t Rx_index =0; // read index
+uint16_t Rx_wrIndex =0; // write index
+uint8_t payloadlength =32;
+
 
 bool isSync = false;
 bool isMyPacket = false;
@@ -42,8 +48,10 @@ bool acessSlotStart_br = false;
 bool uplinkSlot_br = false;
 bool sendJoinResponse_BR = false;
 
-bool uplinkSlot_dev = false;
+bool timersStarted_br = false;
+
 bool acessSlotStart_dev = false;
+bool uplinkSlot_dev = false;
 
 bool txTimeStatus = false; // Its okay for you to transmit
 bool appSendFlag = false; // Flag for the application layer to send the data. Make it true to send data.
@@ -194,6 +202,23 @@ void nrf24l0ChipInit()
 // Timer functions
 //----------------------------------------------------
 
+//Device slots
+
+void joinAccessSlot_DEV(){
+    txTimeStatus = true;
+    acessSlotStart_dev = true;
+
+    //debug
+    putsUart0("JOINstart-D\n");
+}
+void uplinkSlot_DEV(){
+    txTimeStatus = true;
+    acessSlotStart_dev = false;
+    uplinkSlot_dev = true; // Turn off after transmission
+
+    //debug
+    putsUart0("uplinkstart-D\n");
+}
 
 void syncRxDevSlot(){
 // Check if Sync was received by the device and wait for respective slots
@@ -202,6 +227,7 @@ void syncRxDevSlot(){
     }
     else{
         uint32_t myUplinkSlot = getMySlot(eepromGetDevInfo_DEV()); // Get the time you have to wait for your slot
+        myUplinkSlot += GUARD_TIMER;
         startOneshotTimer_ms(uplinkSlot_DEV, myUplinkSlot);
     }
     /*reset all the checks/data */
@@ -210,51 +236,55 @@ void syncRxDevSlot(){
     acessSlotStart_dev = false; // Turned on by timer if join enabled in device
     txTimeStatus = false; // Turned on by one shot timers
 }
-void uplinkSlot_DEV(){
-    txTimeStatus = true;
-    acessSlotStart_dev = false;
-    uplinkSlot_dev = true; // Turn off after transmission
-}
 
-void joinAccessSlot_DEV(){
-    txTimeStatus = true;
-    acessSlotStart_dev = true; // turn off after transmisstion
-}
+
+
+//Bridge Slots
 
 void syncSlot_BR()
 {
     nrfSyncEnabled = true;
     togglePinValue(SYNC_LED); // Toggle SYNC for each sync sent
+    putsUart0("\nSYNC-B\n");
 }
 void downlinkSlot_BR(){
     txTimeStatus = true;
+    downlinkSlotStart_br =true;
+    putsUart0("DL-B\n");
 }
 void fastackSlot_BR(){
     txTimeStatus = true;
     downlinkSlotStart_br = false;
+    fastackSlotStart_br = true;
+    putsUart0("FACK-B\n");
 }
 void joinAccessSlot_BR(){
     txTimeStatus = true;
     fastackSlotStart_br = false;
+    acessSlotStart_br = true;
+    putsUart0("JOIN-B\n");
 }
 void uplinkSlot_BR(){
     acessSlotStart_br = false;
     uplinkSlot_br = false; // since uplink is not being used by bridge
+    putsUart0("UL-B\n");
 }
 
 void TimerHandler_BR()
 {
-    if(downlinkSlotStart_br){ // This will become true when Sync is transmitted
+    if(!timersStarted_br){ // Start timers if not started
+        stopTimer_ms(downlinkSlot_BR);
+        stopTimer_ms(fastackSlot_BR);
+        stopTimer_ms(joinAccessSlot_BR);
+        stopTimer_ms(uplinkSlot_BR);
+
+        putsUart0("timerstarted -BR\n");
         startOneshotTimer_ms(downlinkSlot_BR, DL_SLOT);
-    }
-    if(fastackSlotStart_br){ // This will become true when DL has been transmitted
         startOneshotTimer_ms(fastackSlot_BR, FACK_SLOT);
-    }
-    if(acessSlotStart_br){  // This will become true when fastack has been transmitted
         startOneshotTimer_ms(joinAccessSlot_BR, ACCESS_SLOT);
-    }
-    if(uplinkSlot_br) {     // This will become true when acessSlotStart_br has been transmitted
-    startOneshotTimer_ms(uplinkSlot_BR, UL0_SLOT);
+        startOneshotTimer_ms(uplinkSlot_BR, UL0_SLOT);
+
+        timersStarted_br = true;
     }
 }
 
@@ -321,7 +351,7 @@ void enableSync_BR()
 void enableJoin_DEV()
 {
     if(!getPinValue(JOIN_BUTTON)){ // wait for button press
-        nrfJoinEnabled = true;
+    nrfJoinEnabled = true;
     }
 }
 
@@ -329,7 +359,7 @@ void enableJoin_BR()
 {
     if(!getPinValue(JOIN_BUTTON)){ // wait for button press
         nrfJoinEnabled_BR = true;
-        setPinValue(JOIN_LED,1);
+        setPinValue(JOIN_LED, 1);
     }
 }
 
@@ -392,7 +422,6 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
 void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
 
     int i=0;
-    uint8_t payloadlength =32;
     //CE enable to Rx mode//
     setPinValue(CE_GPIO,1);
     writeNrfReg(W_REGISTER|CONFIG,0x03); // CRC disabled, PWRUP, Prim_Rx =1
@@ -404,11 +433,23 @@ void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
     writeNrfData(R_RX_PAYLOAD);
 
     while(i<payloadlength){
-        readNrfData(&Rxpacket[Rx_index]);
-        Rx_index = (Rx_index +1)%DATA_MAX_SIZE;
+        readNrfData(&Rxpacket[Rx_wrIndex]);
+        Rx_wrIndex = (Rx_wrIndex +1)%DATA_MAX_SIZE;
         ++i;
     }
     disableNrfCs();                     // Frame ends
+
+//    //debug
+//    char str[32];
+////    putsUart0("getdatapacket ");
+//    for(i =0; i<payloadlength; i++){
+//       snprintf(str, sizeof(str), "%"PRIu8, Rxpacket[i]);
+//       putsUart0(str);
+//       if(i%8==0){
+//           putsUart0(" ");
+//       }
+//   }
+//    putsUart0("\n");
 }
 
 void parsenrf24l01DataPacket(){
@@ -417,30 +458,33 @@ void parsenrf24l01DataPacket(){
 
     uint8_t deviceNum = 0;
 
-    if(strncmp((char*)Rxpacket, (char*)syncMsg, sizeof(syncMsg) -2) == 0){ // check sync. Last byte for frame count is omitted
+    if(strncmp((char*)&Rxpacket[Rx_index], (char*)syncMsg, sizeof(syncMsg) -2) == 0){ // check sync. Last byte for frame count is omitted
         isSync = true;
+        Rx_index = 0;
+        Rx_wrIndex = 0;
+        //Rx_index = (Rx_index + payloadlength)%DATA_MAX_SIZE; // increment read index
     }
     else{
-        if(strncmp((char*)Rxpacket, (char*)startCode, sizeof(startCode)) == 0){ // check start code
+        if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
             deviceNum = eepromGetDevInfo_DEV(); //Get device number stored in EEPROm. For already stored devices
-            packetLength = Rxpacket[3] << 8; // MSB ? check this
-            packetLength |= Rxpacket[4];  // LSB
+            packetLength = Rxpacket[Rx_index+ 3] << 8; // MSB
+            packetLength |= Rxpacket[Rx_index +4];  // LSB
 
-            if(Rxpacket[2] == 1){ // DL slot
+            if(Rxpacket[Rx_index + 2] == 1){ // DL slot
                 isDevPacket = true;
                 /*Used in setting dev no in downlink slot */
             }
-            else if(Rxpacket[2] == 2){ // FACK slot
-               if( Rxpacket[5] == deviceNum){ // check whether myDevice got an ACK
+            else if(Rxpacket[Rx_index +2] == 2){ // FACK slot
+               if( Rxpacket[Rx_index +5] == deviceNum){ // check whether myDevice got an ACK
                    msgAcked = true;
                }
             }
-            else if(Rxpacket[2] == 3){ // Msg in ACCESS slot
+            else if(Rxpacket[Rx_index +2] == 3){ // Msg in ACCESS slot
                 isJoinPacket = true;
-                allocatedDevNum = eepromSetGetDevInfo_BR(&Rxpacket[5]); // Send the Mac address of the Joined device and save it in list of devices in Bridge
+                allocatedDevNum = eepromSetGetDevInfo_BR(&Rxpacket[Rx_index + 5]); // Send the Mac address of the Joined device and save it in list of devices in Bridge
 
             }
-            else if(Rxpacket[2] > 3){ // Msg in ACCESS slot
+            else if(Rxpacket[Rx_index +2] > 3){ // Msg in ACCESS slot
                 isBridgePacket = true; // Is this packet received by the Bridge
             }
 
@@ -541,14 +585,16 @@ void nrf24l0TxSync()
     if(nrfSyncEnabled)
     {
 
-        syncMsg[sizeof(syncMsg) -2] = (uint8_t)((syncFrameCount >> 8) & (0xFF)) ; // Frame count
-        syncMsg[sizeof(syncMsg) -1] = (uint8_t)((syncFrameCount & 0xFF)); // Frame count
+        syncMsg[sizeof(syncMsg) -2] = (uint8_t)((syncFrameCount && 0xFF00) >> 8); // Frame count
+        syncMsg[sizeof(syncMsg) -1] = (uint8_t)(syncFrameCount && 0x00FF);
         putNrf24l0DataPacket(syncMsg, sizeof(syncMsg));                                                         /*send sync message*/
         nrfSyncEnabled = false;
         ++syncFrameCount;
         uint32_t mySlotTemp = getMySlot(readEeprom(NO_OF_DEV_IN_BRIDGE));
-        startPeriodicTimer_ms(syncSlot_BR, mySlotTemp);
-        downlinkSlotStart_br = true;
+        mySlotTemp += GUARD_TIMER;
+        stopTimer_ms(syncSlot_BR);
+        startOneshotTimer_ms(syncSlot_BR, mySlotTemp);
+        timersStarted_br = false;
        // setPinValue(SYNC_LED, 1);
     }
 }
@@ -599,13 +645,13 @@ void nrf24l0TxJoinResp_BR()
     txTimeStatus = false;
     nrfJoinEnabled_BR = false;
     sendJoinResponse_BR = false;
-    setPinValue(JOIN_LED,0);
+    setPinValue(JOIN_LED, 0);
 
 }
 
 //void nrf24l0TxDownlink_BR()
 
-int nrf24l0TxMsg(uint8_t* data, uint16_t size, uint8_t devno)
+int nrf24l0TxMsg(uint8_t* data, uint16_t size, uint32_t devBitNum)
 {
     uint8_t packet[DATA_MAX_SIZE] = {0};
     uint8_t *ptr = packet;
@@ -623,8 +669,12 @@ int nrf24l0TxMsg(uint8_t* data, uint16_t size, uint8_t devno)
         ptr += sizeof(slotNo);
         strncpy((char*)ptr , (char*)&remlen, sizeof(remlen));
         ptr += sizeof(remlen);
-//Use devno for sending DL packets
         //user data//
+        //Use devno for sending DL packets from Bridge
+        // Device sends data to Bridge whose dev bit is 0xFFFFFFFF
+        strncpy((char*)ptr , (char*)&devBitNum, sizeof(devBitNum));
+        ptr += sizeof(devBitNum);
+
         strncpy((char*)ptr, (char*)data, size);
         ptr += size;
 
@@ -662,51 +712,58 @@ void nrf24l0RxMsg(callback fn)
         if(isSync) //if sync //
         {
             syncRxDevSlot();                   // Handle device sync slots
-            togglePinValue(SYNC_LED);          // Toggle SYNC for each sync received
+            setPinValue(SYNC_LED, 1);          // Toggle SYNC for each sync received
+            waitMicrosecond(1000);
+            setPinValue(SYNC_LED, 0);
         }
 
-        if((isBridgePacket && Rx_index >= packetLength) ||(isDevPacket && Rx_index >= packetLength))
-        {                                               // is data for me? and have I received whole packet*/
-                                                        //crc check*/
-            Rxchecksum = Rxpacket[Rx_index-1];
-            Rxchecksum = ~Rxchecksum;
-            if(Rxchecksum == nrf24l0GetChecksum(Rxpacket,packetLength))
-            {
-                //Devices and Bridge can pop the data out and utilize it as needed
-
-                fn(Rxpacket, size);                     // downlink data. Callback function */
-                Rx_index = 0;                           // reset for next packet Rx
-                packetLength = 0;
-            }
-                                                        //reset the buffer. */ //Extra precaution
-            for (i=0; i<sizeof(Rxpacket); i++){
-                Rxpacket[i] =0;
-            }
-        }
-
-        if(msgAcked) //check acks for my device //
+        else if(nrfJoinEnabled && isDevPacket) //join response for dev
         {
-            // Received ack . Stop retransmission. Send this to Application layer to stop retransmissting messages
-        }
-
-        if(nrfJoinEnabled && isDevPacket) //join response for dev
-        {
-            eepromSetDevInfo_DEV(Rxpacket[5]);
+            eepromSetDevInfo_DEV(Rxpacket[Rx_index + 5]);
             setPinValue(JOIN_LED,0);
             nrfJoinEnabled = false; // This is true from the moment dev sends a join req and receives a
+            Rx_index += payloadlength - 1;
         }
 
-        if(isJoinPacket){ //
-            // Send Join response to device with allocated Devicenum
-            // Differentiate between join response and regular data in downlink for device
+        else if(msgAcked) //check acks for my device //
+        {
+            // Received ack . Stop retransmission. Send this to Application layer to stop retransmissting messages
+            appSendFlag = false;
+            Rx_index += payloadlength - 1;
+        }
+
+        else if(isJoinPacket){ // Bridge checks for packets received in Access slot if join button pressed on Bridge
+//debug
+putsUart0("isJoinPacket-BR\n");
             if(nrfJoinEnabled_BR && acessSlotStart_br)
             {
-                for(i = 0, j = 5; i< 6; i++, j++)
+                for(i = 0, j = Rx_index + 5; i< 6; i++, j++)
                 {
                     devMac[i] = Rxpacket[j];
                 }
                 sendJoinResponse_BR = true;
                 allocatedDevNum =  eepromSetGetDevInfo_BR(devMac); // Set mac address of bridge in eeprom
+                Rx_index += payloadlength - 1;
+            }
+        }
+
+        else if((isBridgePacket && Rx_index >= packetLength) ||(isDevPacket && Rx_index >= packetLength))
+        {                                               // is data for me? and have I received whole packet*/
+                                                        //crc check*/
+            Rxchecksum = Rxpacket[Rx_index + payloadlength -1];
+            Rxchecksum = ~Rxchecksum;
+            if(Rxchecksum == nrf24l0GetChecksum(&Rxpacket[Rx_index],packetLength))
+            {
+                //Devices and Bridge can pop the data out and utilize it as needed
+
+                fn(&Rxpacket[Rx_index], size);                     // downlink data. Callback function */
+                Rx_index = 0;
+                Rx_wrIndex = 0; // reset for next packet Rx
+                packetLength = 0;
+            }
+                                                        //reset the buffer. */ //Extra precaution
+            for (i=0; i<sizeof(Rxpacket); i++){
+                Rxpacket[i] =0;
             }
         }
     }
@@ -720,7 +777,7 @@ uint32_t getMySlot(uint8_t devno)
         devno = 0;
     }
 
-    return UL0_SLOT + (((22) + GUARD_TIMER)*devno) ;
+    return UL0_SLOT + (((15) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + GUARD_TIMER)*devno) ;
 
     //Handle slots for all transmissions for Devices and bridges separately
 }
@@ -781,27 +838,83 @@ uint8_t eepromSetGetDevInfo_BR(uint8_t *data)
     return devNo;
 }
 
+
+
+void cmdHandler(){ // change this later if necessary
+    bool end;
+    char c;
+    uint8_t i;
+//    uint32_t* p32;
+
+    #define MAX_CHARS 80
+    char strInput[MAX_CHARS+1];
+    char* token;
+    uint8_t count = 0;
+
+    if (kbhitUart0())
+    {
+        c = getcUart0();
+        end = (c == 13) || (count == MAX_CHARS);
+
+        if (!end)
+        {
+            if ((c == 8 || c == 127) && count > 0)
+                count--;
+            if (c >= ' ' && c < 127)
+                strInput[count++] = c;
+        }
+        else
+        {
+            char str[32];
+
+            strInput[count] = '\0';
+            count = 0;
+            token = strtok(strInput, " ");
+            if (strcmp(token, "reboot") == 0)
+            {
+                NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
+            }
+
+            if (strcmp(token, "full") == 0)
+            {
+                putsUart0("fullpacket ");
+
+                for(i =0; i<32; i++){
+                    snprintf(str, sizeof(str), "%"PRIu8, Rxpacket[i]);
+                    putsUart0(str);
+                    if(i%8==0){
+                        putsUart0(" ");
+                    }
+                }
+                putsUart0("\n");
+            }
+        }
+    }
+}
+
 /*
 int main()
 {
     initSystemClockTo40Mhz();
+
     initEeprom();
+    initUart0();
+    setUart0BaudRate(115200, 40e6);
     nrf24l0Init();
+
     // Flush Rx for device and bridge
     uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
     enableSync_BR();
 
     while(true)
     {
-        // debug
-        readNrfReg(R_REGISTER|FIFO_STATUS,&fifoStatus);
-
-// Bridge Functions //
+        cmdHandler();
+        // Bridge Functions //
         nrf24l0TxSync();
         TimerHandler_BR();
         enableJoin_BR();
 
-//Common functions//
+        //Common functions//
         nrf24l0RxMsg(dataReceived);
 
         //check for slot no//
@@ -810,11 +923,16 @@ int main()
             if(sendJoinResponse_BR && downlinkSlotStart_br){
                 nrf24l0TxJoinResp_BR();
                 }
-            else{
-                if(appSendFlag){
-                    nrf24l0TxMsg(data,5, 0); // Magic number devno change later
-                    appSendFlag = false;
-                }
+
+            else if(appSendFlag){ // Used by application layer for controlling transmissions
+
+                    if(downlinkSlotStart_br){
+                        nrf24l0TxMsg(data,5, 0); // Magic number devno change later to use Tx buffer pointer
+                    }
+                    if(fastackSlotStart_br){
+                        nrf24l0TxMsg(data,5, 0); // Magic number devno change later to use Tx buffer pointer
+                        appSendFlag = false;
+                    }
             }
         }
     }
@@ -824,12 +942,18 @@ int main()
 int main()
 {
     initSystemClockTo40Mhz();
+
     initEeprom();
+    initUart0();
+    setUart0BaudRate(115200, 40e6);
     nrf24l0Init();
+
     uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
 
     while(true)
         {
+        cmdHandler();
+
     //Device functions
         enableJoin_DEV();
     //Common functions
@@ -843,11 +967,10 @@ int main()
                 nrf24l0TxJoinReq_DEV();
                 setPinValue(JOIN_LED,1);
                 }
-            else{
-                if(appSendFlag){
-                    nrf24l0TxMsg(data,5, 0); // Magic number devno change later
+            else if(appSendFlag && uplinkSlot_dev){ // Appsend flag is controlled by application layer.
+                    nrf24l0TxMsg(data,5, 0); // Magic number devno change later to use TxFIFO buffer pointer
                     appSendFlag = false;
-                }
+
             }
         }
     }

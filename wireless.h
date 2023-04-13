@@ -60,10 +60,10 @@
 
 //Slot Management Macros
 
-#define GUARD_TIMER         (1u) // minimum is 1 ms
-#define TX_RX_DELAY         (200) //used by waitMicroseconds
-#define TX_RX_DELAY_SLOT    (0.2) //milliseconds
-#define _32BYTE_PACKETS     (47) // 1500/32 , 32 byte packets
+#define GUARD_TIMER             (500u) // ?? minimum is 1 ms
+#define TX_RX_DELAY             (200u) // used by waitmicroseconds
+#define TX_RX_DELAY_SLOT        (0.2) //milliseconds
+#define _32BYTE_PACKETS         (47) // 1500/32 , 32 byte packets
 
 #define SYNC_SLOT   (0)
 #define DL_SLOT     (2) + GUARD_TIMER
@@ -129,7 +129,7 @@ typedef void (*callback)(uint8_t *data, uint16_t size);
 //----------------------------------------------------
 
 void nrf24l0Init();
-int nrf24l0TxMsg(uint8_t* data, uint16_t size,uint8_t devno);
+int nrf24l0TxMsg(uint8_t* data, uint16_t size,uint32_t devBitNum);
 void nrf24l0RxMsg(callback fn);
 
 //----------------------------------------------------
