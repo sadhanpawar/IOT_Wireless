@@ -377,15 +377,13 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
 {
     uint8_t j =0;
     int i = 0;
-    uint8_t regdata =0;
 
     // go to standby 1 mode
     setPinValue(CE_GPIO,0);
     waitMicrosecond(TX_RX_DELAY);
 
     // Tx mode setting
-    //readNrfReg(R_REGISTER|CONFIG, &regdata);
-    writeNrfReg(W_REGISTER|CONFIG,0x0C | 0x02); // CRC disabled, PWRUP, Prim_rx =0
+    writeNrfReg(W_REGISTER|CONFIG,0x0E); // CRC disabled, PWRUP, Prim_rx =0
     enableNrfCs(); // Frame begins
     writeNrfData(W_TX_PAYLOAD_NO_ACK);
 
@@ -427,7 +425,7 @@ void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
     setPinValue(CE_GPIO,1);
 
     //readNrfReg(R_REGISTER|CONFIG, &regdata);
-    writeNrfReg(W_REGISTER|CONFIG,0x0C|0x03); // PWRUP, Prim_Rx =1
+    writeNrfReg(W_REGISTER|CONFIG,0x0F); // PWRUP, Prim_Rx =1
     waitMicrosecond(TX_RX_DELAY);
     readNrfReg(R_REGISTER|R_RX_PL_WID, &payloadlength); // get the payload length of Rx packet
 
@@ -535,7 +533,7 @@ void nrf24l0PowerUp()
     readNrfReg(R_REGISTER|CONFIG, &data);
 
     if(!(data & 0x02)) {
-        writeNrfReg(W_REGISTER|CONFIG, data | 0x02);
+        writeNrfReg(W_REGISTER|CONFIG, 0x0E);
         waitMicrosecond(5000); // Wait 5 ms for checking that data write is complete
     }
 
@@ -548,7 +546,7 @@ bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
     nrf24l0PowerUp();
 
     //readNrfReg(R_REGISTER|CONFIG, &data);
-    writeNrfReg(W_REGISTER|CONFIG, 0x0C | 0x1);
+    writeNrfReg(W_REGISTER|CONFIG, 0x0F);
 
     data = 0x70;
     writeNrfReg(W_REGISTER|STATUS, data);
@@ -613,10 +611,10 @@ void nrf24l0TxSync()
 
 void nrf24l0TxJoinReq_DEV()
 {
-    uint8_t joinBuffer[10] = {0};
+    uint8_t joinBuffer[15] = {0};
     uint8_t* ptr = joinBuffer;
     uint8_t slot = 3; // Accessslot
-    uint8_t remlen = 1+sizeof(myMac);
+    uint16_t remlen = 1+sizeof(myMac);
 
     strncpy((char*)ptr,(char*)startCode,sizeof(startCode));
     ptr += sizeof(startCode);
@@ -632,6 +630,7 @@ void nrf24l0TxJoinReq_DEV()
     putNrf24l0DataPacket(joinBuffer, sizeof(joinBuffer));
     txTimeStatus = false;
 //    nrfJoinEnabled = false;
+    putsUart0("joinrequest-D\n");
     acessSlotStart_dev = false;
 }
 
@@ -640,7 +639,7 @@ void nrf24l0TxJoinResp_BR()
     uint8_t joinBuffer[10] = {0};
     uint8_t* ptr = joinBuffer;
     uint8_t slot = 1; // DL slot
-    uint8_t remlen = 1+1; //crc + dev no
+    uint16_t remlen = 1+1; //crc + dev no
 
     strncpy((char*)ptr,(char*)startCode,sizeof(startCode));
     ptr += sizeof(startCode);
@@ -714,7 +713,7 @@ void nrf24l0RxMsg(callback fn)
     uint8_t Rxchecksum = 0; // Received checksum
     uint8_t devMac[6] = {0};
     uint8_t i,j = 0;
-
+    char str[30];
 
     if(isNrf24l0DataAvailable()) {
 
@@ -733,6 +732,9 @@ void nrf24l0RxMsg(callback fn)
 
         else if(nrfJoinEnabled && isDevPacket) //join response for dev
         {
+            putsUart0("joinresponse-D\n");
+            snprintf(str, sizeof(str), "allocated dev no: %"PRIu8"\n",Rxpacket[Rx_index + 5]);
+            putsUart0(str);
             eepromSetDevInfo_DEV(Rxpacket[Rx_index + 5]);
             setPinValue(JOIN_LED,0);
             nrfJoinEnabled = false; // This is true from the moment dev sends a join req and receives a
@@ -839,12 +841,31 @@ uint8_t eepromSetGetDevInfo_BR(uint8_t *data)
     }
 
     --ptr;
-    *ptr = noOfDev++;
-    devNo = *ptr;
+    ++noOfDev;
+    writeEeprom((uint16_t)ptr,noOfDev);
+    devNo = readEeprom((uint16_t)ptr);
     writeEeprom(NO_OF_DEV_IN_BRIDGE,devNo); /* store total no of devices */
-    ptr ++;
+    ++ptr;
 
     /*mac*/
+//    uint32_t highAddrMac = 0;
+//
+//    for(i = 7; i >= 4 ; i-- ) {
+//        highAddrMac |= (data[i] << 8*(i-4));
+//    }
+//
+//    writeEeprom(ptr, highAddrMac);
+//    ptr+=4;
+//
+//    for(i = 3; i >= 0 ; i-- ) {
+//        lowAddrMac |= (data[i] << 8*(i));
+//    }
+//
+//    writeEeprom(ptr, lowAddrMac);
+
+//    writeEeprom(ptr, data); //4bytes
+//    ptr += 4;
+//    writeEeprom(ptr, data);
     for(i = 0; i < sizeof(myMac); i++) {
         ptr[i] = data[i];
     }
@@ -886,6 +907,8 @@ void cmdHandler(){ // change this later if necessary
             token = strtok(strInput, " ");
             if (strcmp(token, "reboot") == 0)
             {
+                writeNrfReg(W_REGISTER|CONFIG, 0x00); // Power down
+                waitMicrosecond(5000);
                 NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
             }
 
