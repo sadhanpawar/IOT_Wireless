@@ -112,7 +112,7 @@ void nrf24l0ChipInit()
 
     waitMicrosecond(5000);          // Wait for the nrf module to settle
 
-    data = 0x00;                    // Interrupts off,no CRC, PWR_UP, Def Rx mode
+    data = 0x0C;                    // Interrupts off,Enable CRC, 2 byte CRC
     writeNrfReg(W_REGISTER|CONFIG,data );
 
     data = 0x00;                    // Turn off retransmission   /*Check for using retransmission later*/
@@ -141,24 +141,23 @@ void nrf24l0ChipInit()
     data = 0x00;                    // Turn off auto ACKs
     writeNrfReg(W_REGISTER|EN_AA,data );
 
-/*// Turn on default Rx pipes
+/*
+// Turn on default Rx pipes
     data = 0x03;
     writeNrfReg(W_REGISTER|EN_RXADDR,data );
 
 
-    data = 0x01;                    // 3byte Rx/Tx address width
+    data = 0x03;                    // 5byte Rx/Tx address width
     writeNrfReg(W_REGISTER|SETUP_AW,data );
-*/
 
-/*
-    uint32_t pipeaddr = 0xAFAFAF;                    // Address for rx pipes
+    uint32_t pipeaddr = 0xAFAFAFAFAF;                    // Address for rx pipe 1
 
-    enableNrfCs();
-    writeSpi1Data(W_REGISTER|RX_ADDR_P0);
-    readSpi1Data();
-    writeSpi1Data(pipeaddr);
-    readSpi1Data();
-    disableNrfCs();
+//    enableNrfCs();
+//    writeSpi1Data(W_REGISTER|RX_ADDR_P0);
+//    readSpi1Data();
+//    writeSpi1Data(pipeaddr);
+//    readSpi1Data();
+//    disableNrfCs();
 
     enableNrfCs();
     writeSpi1Data(W_REGISTER|RX_ADDR_P0 +1);
@@ -166,12 +165,12 @@ void nrf24l0ChipInit()
     writeSpi1Data(pipeaddr);
     readSpi1Data();
     disableNrfCs();
-
-    data = 0xAF;
-    writeNrfReg(W_REGISTER|RX_ADDR_P0 +2,data );
-    writeNrfReg(W_REGISTER|RX_ADDR_P0 +3,data );
-    writeNrfReg(W_REGISTER|RX_ADDR_P0 +4,data );
-    writeNrfReg(W_REGISTER|RX_ADDR_P0 +5,data );
+//
+//    data = 0xAF;
+//    writeNrfReg(W_REGISTER|RX_ADDR_P0 +2,data );
+//    writeNrfReg(W_REGISTER|RX_ADDR_P0 +3,data );
+//    writeNrfReg(W_REGISTER|RX_ADDR_P0 +4,data );
+//    writeNrfReg(W_REGISTER|RX_ADDR_P0 +5,data );
 
      // Set Tx address
     enableNrfCs();
@@ -180,11 +179,7 @@ void nrf24l0ChipInit()
     writeSpi1Data(pipeaddr);
     readSpi1Data();
     disableNrfCs();
-
-    */
-
-
-
+*/
     enableNrfCs();                              // Flush Tx FIFO after sending a SYNC
     writeSpi1Data(W_REGISTER|FLUSH_TX);
     readSpi1Data();
@@ -223,11 +218,13 @@ void uplinkSlot_DEV(){
 void syncRxDevSlot(){
 // Check if Sync was received by the device and wait for respective slots
     if(nrfJoinEnabled){
+        stopTimer_ms(joinAccessSlot_DEV);
         startOneshotTimer_ms(joinAccessSlot_DEV, ACCESS_SLOT);
     }
     else{
         uint32_t myUplinkSlot = getMySlot(eepromGetDevInfo_DEV()); // Get the time you have to wait for your slot
         myUplinkSlot += GUARD_TIMER;
+        stopTimer_ms(uplinkSlot_DEV);
         startOneshotTimer_ms(uplinkSlot_DEV, myUplinkSlot);
     }
     /*reset all the checks/data */
@@ -244,10 +241,11 @@ void syncRxDevSlot(){
 void syncSlot_BR()
 {
     nrfSyncEnabled = true;
-    togglePinValue(SYNC_LED); // Toggle SYNC for each sync sent
+    setPinValue(SYNC_LED,1); // Toggle SYNC for each sync sent
     putsUart0("\nSYNC-B\n");
 }
 void downlinkSlot_BR(){
+    setPinValue(SYNC_LED,0); // Toggle SYNC for each sync sent
     txTimeStatus = true;
     downlinkSlotStart_br =true;
     putsUart0("DL-B\n");
@@ -379,13 +377,15 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
 {
     uint8_t j =0;
     int i = 0;
+    uint8_t regdata =0;
 
     // go to standby 1 mode
     setPinValue(CE_GPIO,0);
     waitMicrosecond(TX_RX_DELAY);
 
     // Tx mode setting
-    writeNrfReg(W_REGISTER|CONFIG,0x02); // CRC disabled, PWRUP, Prim_rx =0
+    //readNrfReg(R_REGISTER|CONFIG, &regdata);
+    writeNrfReg(W_REGISTER|CONFIG,0x0C | 0x02); // CRC disabled, PWRUP, Prim_rx =0
     enableNrfCs(); // Frame begins
     writeNrfData(W_TX_PAYLOAD_NO_ACK);
 
@@ -422,9 +422,12 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
 void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
 
     int i=0;
+    uint8_t regdata =0;
     //CE enable to Rx mode//
     setPinValue(CE_GPIO,1);
-    writeNrfReg(W_REGISTER|CONFIG,0x03); // CRC disabled, PWRUP, Prim_Rx =1
+
+    //readNrfReg(R_REGISTER|CONFIG, &regdata);
+    writeNrfReg(W_REGISTER|CONFIG,0x0C|0x03); // PWRUP, Prim_Rx =1
     waitMicrosecond(TX_RX_DELAY);
     readNrfReg(R_REGISTER|R_RX_PL_WID, &payloadlength); // get the payload length of Rx packet
 
@@ -465,7 +468,11 @@ void parsenrf24l01DataPacket(){
         //Rx_index = (Rx_index + payloadlength)%DATA_MAX_SIZE; // increment read index
     }
     else{
-        if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
+
+        if(packetLength != 0) {
+
+        }
+        else if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
             deviceNum = eepromGetDevInfo_DEV(); //Get device number stored in EEPROm. For already stored devices
             packetLength = Rxpacket[Rx_index+ 3] << 8; // MSB
             packetLength |= Rxpacket[Rx_index +4];  // LSB
@@ -489,6 +496,11 @@ void parsenrf24l01DataPacket(){
             }
 
         }
+        else
+        {
+            Rx_index = 0;
+            Rx_wrIndex = 0;
+        }
     }
 
 
@@ -504,7 +516,7 @@ bool nrf24l0TxStatus()
 bool nrf24l0RxStatus()
 {
     uint8_t data = 0;
-    readNrfReg(R_REGISTER|FIFO_STATUS,&data);
+    readNrfReg(R_REGISTER|STATUS,&data);
     if(((data & 0x0E) == 0x0E) || ((data & 0x0E) == 0x0C)){ // check for the data pipe in RX_P_NO in FIFO_STATUS
         return false;
     }
@@ -535,8 +547,8 @@ bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
 
     nrf24l0PowerUp();
 
-    readNrfReg(R_REGISTER|CONFIG, &data);
-    writeNrfReg(W_REGISTER|CONFIG, data | 0x1);
+    //readNrfReg(R_REGISTER|CONFIG, &data);
+    writeNrfReg(W_REGISTER|CONFIG, 0x0C | 0x1);
 
     data = 0x70;
     writeNrfReg(W_REGISTER|STATUS, data);
@@ -585,8 +597,8 @@ void nrf24l0TxSync()
     if(nrfSyncEnabled)
     {
 
-        syncMsg[sizeof(syncMsg) -2] = (uint8_t)((syncFrameCount && 0xFF00) >> 8); // Frame count
-        syncMsg[sizeof(syncMsg) -1] = (uint8_t)(syncFrameCount && 0x00FF);
+        syncMsg[sizeof(syncMsg) -2] = (uint8_t)((syncFrameCount & 0xFF00)>>8); // Frame count
+        syncMsg[sizeof(syncMsg) -1] = (uint8_t)(syncFrameCount & 0x00FF);
         putNrf24l0DataPacket(syncMsg, sizeof(syncMsg));                                                         /*send sync message*/
         nrfSyncEnabled = false;
         ++syncFrameCount;
@@ -712,9 +724,11 @@ void nrf24l0RxMsg(callback fn)
         if(isSync) //if sync //
         {
             syncRxDevSlot();                   // Handle device sync slots
-            setPinValue(SYNC_LED, 1);          // Toggle SYNC for each sync received
+
+            setPinValue(SYNC_LED,1);          // Toggle SYNC for each sync received
             waitMicrosecond(1000);
-            setPinValue(SYNC_LED, 0);
+            setPinValue(SYNC_LED,0);
+            putsUart0("sync-D\n");
         }
 
         else if(nrfJoinEnabled && isDevPacket) //join response for dev
@@ -949,6 +963,8 @@ int main()
     nrf24l0Init();
 
     uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
+
+    putsUart0("Device Initiated\n");
 
     while(true)
         {
