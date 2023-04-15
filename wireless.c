@@ -793,7 +793,7 @@ uint32_t getMySlot(uint8_t devno)
         devno = 0;
     }
 
-    return UL0_SLOT + (((15) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + GUARD_TIMER)*devno) ;
+    return UL0_SLOT + (((50) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + GUARD_TIMER)*devno) ;
 
     //Handle slots for all transmissions for Devices and bridges separately
 }
@@ -929,7 +929,7 @@ void cmdHandler(){ // change this later if necessary
     }
 }
 
-/*
+
 int main()
 {
     initSystemClockTo40Mhz();
@@ -974,8 +974,8 @@ int main()
         }
     }
 }
-*/
 
+/*
 int main()
 {
     initSystemClockTo40Mhz();
@@ -1014,6 +1014,6 @@ int main()
         }
     }
 }
-
+*/
 
 
