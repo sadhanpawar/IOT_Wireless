@@ -42,7 +42,7 @@ bool isDevPacket = false;
 bool isBridgePacket = false;
 bool isJoinPacket = false;
 
-bool downlinkSlotStart_br  = false; // Wait for the Downlink slot start
+bool downlinkSlotStart_br  = false; // Wait for the Downlink slotNo start
 bool fastackSlotStart_br = false;
 bool acessSlotStart_br = false;
 bool uplinkSlot_br = false;
@@ -60,6 +60,7 @@ bool appSendFlag = false; // Flag for the application layer to send the data. Ma
 //----------------------------------------------------
 
 uint8_t fifoStatus = 0;
+bool debugMsg = true;
 
 //----------------------------------------------------
 // Initialize hardware
@@ -118,7 +119,7 @@ void nrf24l0ChipInit()
     data = 0x00;                    // Turn off retransmission   /*Check for using retransmission later*/
     writeNrfReg(W_REGISTER|SETUP_RETR,data );
 
-    data = 0x01;                    // RF data rate to 1Mbps / 1 Mhz and power is -12 dbm with 7.5 mA consumption (medium power consumption)
+    data = 0x03;                    // RF data rate to 1Mbps / 1 Mhz and power is -12 dbm with 7.5 mA consumption (medium power consumption)
     writeNrfReg(W_REGISTER|RF_SETUP,data );
 
     data = 0x05;                                // enable dynamic payloads, enable Tx_payload, NO_ACK
@@ -130,7 +131,7 @@ void nrf24l0ChipInit()
     data = 0x70;
     writeNrfReg(W_REGISTER|STATUS, data);
 
-    data = 0x01;                    // Set RF channel to be 2400 + 1(data) mhz
+    data = 76;                    // Set RF channel to be 2400 + 1(data) mhz
     writeNrfReg(W_REGISTER|RF_CH,data );
 
     //data = 0x03;                    // Interrupts off,no CRC, PWR_UP, Def Rx mode
@@ -140,7 +141,6 @@ void nrf24l0ChipInit()
 
     data = 0x00;                    // Turn off auto ACKs
     writeNrfReg(W_REGISTER|EN_AA,data );
-
 /*
 // Turn on default Rx pipes
     data = 0x03;
@@ -149,6 +149,8 @@ void nrf24l0ChipInit()
 
     data = 0x03;                    // 5byte Rx/Tx address width
     writeNrfReg(W_REGISTER|SETUP_AW,data );
+
+
 
     uint32_t pipeaddr = 0xAFAFAFAFAF;                    // Address for rx pipe 1
 
@@ -201,6 +203,7 @@ void nrf24l0ChipInit()
 
 void joinAccessSlot_DEV(){
     txTimeStatus = true;
+    slotNo = 3;
     acessSlotStart_dev = true;
 
     //debug
@@ -208,6 +211,7 @@ void joinAccessSlot_DEV(){
 }
 void uplinkSlot_DEV(){
     txTimeStatus = true;
+    slotNo = eepromGetDevInfo_DEV() + 4;
     acessSlotStart_dev = false;
     uplinkSlot_dev = true; // Turn off after transmission
 
@@ -222,14 +226,14 @@ void syncRxDevSlot(){
         startOneshotTimer_ms(joinAccessSlot_DEV, ACCESS_SLOT);
     }
     else{
-        uint32_t myUplinkSlot = getMySlot(eepromGetDevInfo_DEV()); // Get the time you have to wait for your slot
+        uint32_t myUplinkSlot = getMySlot(eepromGetDevInfo_DEV()); // Get the time you have to wait for your slotNo
         myUplinkSlot += GUARD_TIMER;
         stopTimer_ms(uplinkSlot_DEV);
         startOneshotTimer_ms(uplinkSlot_DEV, myUplinkSlot);
     }
     /*reset all the checks/data */
     isSync = false;
-    uplinkSlot_dev = false;     // turned on by timer in its slot
+    uplinkSlot_dev = false;     // turned on by timer in its slotNo
     acessSlotStart_dev = false; // Turned on by timer if join enabled in device
     txTimeStatus = false; // Turned on by one shot timers
 }
@@ -241,23 +245,27 @@ void syncRxDevSlot(){
 void syncSlot_BR()
 {
     nrfSyncEnabled = true;
+    slotNo = 0;
     setPinValue(SYNC_LED,1); // Toggle SYNC for each sync sent
     putsUart0("\nSYNC-B\n");
 }
 void downlinkSlot_BR(){
     setPinValue(SYNC_LED,0); // Toggle SYNC for each sync sent
+    slotNo = 1;
     txTimeStatus = true;
     downlinkSlotStart_br =true;
     putsUart0("DL-B\n");
 }
 void fastackSlot_BR(){
     txTimeStatus = true;
+    slotNo = 2;
     downlinkSlotStart_br = false;
     fastackSlotStart_br = true;
     putsUart0("FACK-B\n");
 }
 void joinAccessSlot_BR(){
     txTimeStatus = true;
+    slotNo = 3;
     fastackSlotStart_br = false;
     acessSlotStart_br = true;
     putsUart0("JOIN-B\n");
@@ -276,7 +284,7 @@ void TimerHandler_BR()
         stopTimer_ms(joinAccessSlot_BR);
         stopTimer_ms(uplinkSlot_BR);
 
-        putsUart0("timerstarted -BR\n");
+        putsUart0("ts -BR\n");
         startOneshotTimer_ms(downlinkSlot_BR, DL_SLOT);
         startOneshotTimer_ms(fastackSlot_BR, FACK_SLOT);
         startOneshotTimer_ms(joinAccessSlot_BR, ACCESS_SLOT);
@@ -383,7 +391,7 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
     waitMicrosecond(TX_RX_DELAY);
 
     // Tx mode setting
-    writeNrfReg(W_REGISTER|CONFIG,0x0E); // CRC disabled, PWRUP, Prim_rx =0
+    writeNrfReg(W_REGISTER|CONFIG,0x0E); // CRC enabled, PWRUP, Prim_rx =0
     enableNrfCs(); // Frame begins
     writeNrfData(W_TX_PAYLOAD_NO_ACK);
 
@@ -420,12 +428,10 @@ void putNrf24l0DataPacket(uint8_t *data, uint16_t size)
 void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
 
     int i=0;
-    uint8_t regdata =0;
     //CE enable to Rx mode//
     setPinValue(CE_GPIO,1);
 
-    //readNrfReg(R_REGISTER|CONFIG, &regdata);
-    writeNrfReg(W_REGISTER|CONFIG,0x0F); // PWRUP, Prim_Rx =1
+    writeNrfReg(W_REGISTER|CONFIG,0x0F); // CRC enabled, PWRUP, Prim_Rx =1
     waitMicrosecond(TX_RX_DELAY);
     readNrfReg(R_REGISTER|R_RX_PL_WID, &payloadlength); // get the payload length of Rx packet
 
@@ -440,6 +446,10 @@ void getnrf24l01DataPacket(){ // Get 32 bytes of data at a time
     }
     disableNrfCs();                     // Frame ends
 
+    enableNrfCs();                              // Flush Tx FIFO after sending a SYNC
+    writeSpi1Data(W_REGISTER|FLUSH_RX);
+    readSpi1Data();
+    disableNrfCs();
 //    //debug
 //    char str[32];
 ////    putsUart0("getdatapacket ");
@@ -459,7 +469,7 @@ void parsenrf24l01DataPacket(){
 
     uint8_t deviceNum = 0;
 
-    if(strncmp((char*)&Rxpacket[Rx_index], (char*)syncMsg, sizeof(syncMsg) -2) == 0){ // check sync. Last byte for frame count is omitted
+    if(strncmp((char*)&Rxpacket[Rx_wrIndex - payloadlength], (char*)syncMsg, sizeof(syncMsg) -2) == 0){ // check sync. Last byte for frame count is omitted
         isSync = true;
         Rx_index = 0;
         Rx_wrIndex = 0;
@@ -467,41 +477,39 @@ void parsenrf24l01DataPacket(){
     }
     else{
 
-        if(packetLength != 0) {
-
+        if(packetLength > 32 ){ // Check for continuos transmission of data
+               putsUart0("more than 32 bytes\n");
         }
         else if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
             deviceNum = eepromGetDevInfo_DEV(); //Get device number stored in EEPROm. For already stored devices
-            packetLength = Rxpacket[Rx_index+ 3] << 8; // MSB
-            packetLength |= Rxpacket[Rx_index +4];  // LSB
+            packetLength = Rxpacket[Rx_index+ 4] << 8; // MSB
+            packetLength |= Rxpacket[Rx_index +3];  // LSB
 
-            if(Rxpacket[Rx_index + 2] == 1){ // DL slot
+            if(Rxpacket[Rx_index + 2] == 1){ // DL slotNo
                 isDevPacket = true;
-                /*Used in setting dev no in downlink slot */
+                putsUart0("DL data received\n");
+                /*Used in setting dev no in downlink slotNo */
             }
-            else if(Rxpacket[Rx_index +2] == 2){ // FACK slot
+            else if(Rxpacket[Rx_index +2] == 2){ // FACK slotNo
                if( Rxpacket[Rx_index +5] == deviceNum){ // check whether myDevice got an ACK
                    msgAcked = true;
                }
             }
-            else if(Rxpacket[Rx_index +2] == 3){ // Msg in ACCESS slot
+            else if(Rxpacket[Rx_index +2] == 3){ // Msg in ACCESS slotNo
                 isJoinPacket = true;
                 allocatedDevNum = eepromSetGetDevInfo_BR(&Rxpacket[Rx_index + 5]); // Send the Mac address of the Joined device and save it in list of devices in Bridge
 
             }
-            else if(Rxpacket[Rx_index +2] > 3){ // Msg in ACCESS slot
+            else if(Rxpacket[Rx_index +2] > 3){ // Msg in ACCESS slotNo
                 isBridgePacket = true; // Is this packet received by the Bridge
             }
 
         }
-        else
-        {
-            Rx_index = 0;
-            Rx_wrIndex = 0;
+        else{ // Error handling in case of junk data
+            Rx_index =0;
+            Rx_wrIndex =0;
         }
     }
-
-
 }
 
 bool nrf24l0TxStatus()
@@ -514,6 +522,7 @@ bool nrf24l0TxStatus()
 bool nrf24l0RxStatus()
 {
     uint8_t data = 0;
+   // readNrfReg(R_REGISTER|FIFO_STATUS,&data);
     readNrfReg(R_REGISTER|STATUS,&data);
     if(((data & 0x0E) == 0x0E) || ((data & 0x0E) == 0x0C)){ // check for the data pipe in RX_P_NO in FIFO_STATUS
         return false;
@@ -533,8 +542,9 @@ void nrf24l0PowerUp()
     readNrfReg(R_REGISTER|CONFIG, &data);
 
     if(!(data & 0x02)) {
-        writeNrfReg(W_REGISTER|CONFIG, 0x0E);
+        writeNrfReg(W_REGISTER|CONFIG, 0x0E); // CRC enabled, PWRUP, PRIM_RX=0
         waitMicrosecond(5000); // Wait 5 ms for checking that data write is complete
+
     }
 
 }
@@ -546,7 +556,7 @@ bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
     nrf24l0PowerUp();
 
     //readNrfReg(R_REGISTER|CONFIG, &data);
-    writeNrfReg(W_REGISTER|CONFIG, 0x0F);
+    writeNrfReg(W_REGISTER|CONFIG, 0x0F); // CRC enabled, PWRup, PRIM_RX=1
 
     data = 0x70;
     writeNrfReg(W_REGISTER|STATUS, data);
@@ -567,12 +577,16 @@ bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
 callback dataReceived(uint8_t *data, uint16_t size)
 {
     uint8_t i;
-    uint8_t buffer[30] = {0};
-
+    uint8_t buffer[32] = {0};
+    char str[32];
+    putsUart0("data received to app layer\n");
     /*data copy*/
     for(i = 0; i < size; i++) {
         buffer[i] = data[i];
+        snprintf(str,sizeof(str),"%u ",data[i]);
+        putsUart0(str);
     }
+    putsUart0("\n");
 }
 
 
@@ -613,20 +627,20 @@ void nrf24l0TxJoinReq_DEV()
 {
     uint8_t joinBuffer[15] = {0};
     uint8_t* ptr = joinBuffer;
-    uint8_t slot = 3; // Accessslot
+    uint8_t slotNo = 3; // Accessslot
     uint16_t remlen = 1+sizeof(myMac);
 
     strncpy((char*)ptr,(char*)startCode,sizeof(startCode));
     ptr += sizeof(startCode);
-    strncpy((char*)ptr , (char*)&slot, sizeof(slot));
-    ptr += sizeof(slot);
+    strncpy((char*)ptr , (char*)&slotNo, sizeof(slotNo));
+    ptr += sizeof(slotNo);
     strncpy((char*)ptr , (char*)&remlen, sizeof(remlen));
     ptr += sizeof(remlen);
     strncpy((char*)ptr , (char*)myMac, sizeof(myMac));
     ptr += sizeof(myMac);
     *ptr += nrf24l0GetChecksum(joinBuffer,sizeof(joinBuffer));
 
-    //send join request in access slot
+    //send join request in access slotNo
     putNrf24l0DataPacket(joinBuffer, sizeof(joinBuffer));
     txTimeStatus = false;
 //    nrfJoinEnabled = false;
@@ -638,20 +652,20 @@ void nrf24l0TxJoinResp_BR()
 {
     uint8_t joinBuffer[10] = {0};
     uint8_t* ptr = joinBuffer;
-    uint8_t slot = 1; // DL slot
+    uint8_t slotNo = 1; // DL slotNo
     uint16_t remlen = 1+1; //crc + dev no
 
     strncpy((char*)ptr,(char*)startCode,sizeof(startCode));
     ptr += sizeof(startCode);
-    strncpy((char*)ptr , (char*)&slot, sizeof(slot));
-    ptr += sizeof(slot);
+    strncpy((char*)ptr , (char*)&slotNo, sizeof(slotNo));
+    ptr += sizeof(slotNo);
     strncpy((char*)ptr , (char*)&remlen, sizeof(remlen));
     ptr += sizeof(remlen);
     strncpy((char*)ptr , (char*)&allocatedDevNum, sizeof(allocatedDevNum));
     ptr += sizeof(allocatedDevNum);
     *ptr += nrf24l0GetChecksum(joinBuffer,sizeof(joinBuffer));
 
-    //send join response in access slot//
+    //send join response in access slotNo//
     putNrf24l0DataPacket(joinBuffer, sizeof(joinBuffer));
     txTimeStatus = false;
     nrfJoinEnabled_BR = false;
@@ -666,7 +680,7 @@ int nrf24l0TxMsg(uint8_t* data, uint16_t size, uint32_t devBitNum)
 {
     uint8_t packet[DATA_MAX_SIZE] = {0};
     uint8_t *ptr = packet;
-    uint16_t remlen = size+1; /*Increment lenght for checksum */
+    uint16_t remlen = size+1 + sizeof(devBitNum); /*Increment lenght for checksum */
 
         if(size > (DATA_MAX_SIZE - META_DATA_SIZE))
         {
@@ -697,6 +711,11 @@ int nrf24l0TxMsg(uint8_t* data, uint16_t size, uint32_t devBitNum)
         //guard timer //
         waitMicrosecond(GUARD_TIMER);
 
+        enableNrfCs();                              // Flush Tx FIFO after sending
+        writeSpi1Data(W_REGISTER|FLUSH_TX);
+        readSpi1Data();
+        disableNrfCs();
+
     return 0;
 }
 
@@ -706,13 +725,13 @@ void nrf24l0RxMsg(callback fn)
 {
     // Devices use this function as used in template code to keep on polling the data to check for received messages
     //**SYNC
-    // Check for Sync message and start timers for the devices transmission slot
-    // If a new device is Joining a timer is started to wait for transmission in ACCESS slot
+    // Check for Sync message and start timers for the devices transmission slotNo
+    // If a new device is Joining a timer is started to wait for transmission in ACCESS slotNo
     // If the bridge is transmitting (assumption that Bridge device also sends the Sync packets), Wait for Downlink and FASTACK slots to transmit data
     uint16_t size = 0;
     uint8_t Rxchecksum = 0; // Received checksum
     uint8_t devMac[6] = {0};
-    uint8_t i,j = 0;
+    uint16_t i,j = 0;
     char str[30];
 
     if(isNrf24l0DataAvailable()) {
@@ -727,7 +746,7 @@ void nrf24l0RxMsg(callback fn)
             setPinValue(SYNC_LED,1);          // Toggle SYNC for each sync received
             waitMicrosecond(1000);
             setPinValue(SYNC_LED,0);
-            putsUart0("sync-D\n");
+            putsUart0("SYNC-D\n");
         }
 
         else if(nrfJoinEnabled && isDevPacket) //join response for dev
@@ -735,6 +754,7 @@ void nrf24l0RxMsg(callback fn)
             putsUart0("joinresponse-D\n");
             snprintf(str, sizeof(str), "allocated dev no: %"PRIu8"\n",Rxpacket[Rx_index + 5]);
             putsUart0(str);
+
             eepromSetDevInfo_DEV(Rxpacket[Rx_index + 5]);
             setPinValue(JOIN_LED,0);
             nrfJoinEnabled = false; // This is true from the moment dev sends a join req and receives a
@@ -748,7 +768,7 @@ void nrf24l0RxMsg(callback fn)
             Rx_index += payloadlength - 1;
         }
 
-        else if(isJoinPacket){ // Bridge checks for packets received in Access slot if join button pressed on Bridge
+        else if(isJoinPacket){ // Bridge checks for packets received in Access slotNo if join button pressed on Bridge
 //debug
 putsUart0("isJoinPacket-BR\n");
             if(nrfJoinEnabled_BR && acessSlotStart_br)
@@ -760,22 +780,26 @@ putsUart0("isJoinPacket-BR\n");
                 sendJoinResponse_BR = true;
                 allocatedDevNum =  eepromSetGetDevInfo_BR(devMac); // Set mac address of bridge in eeprom
                 Rx_index += payloadlength - 1;
+
+                putsUart0("Join Packet Req- BR\n");
+
             }
         }
 
-        else if((isBridgePacket && Rx_index >= packetLength) ||(isDevPacket && Rx_index >= packetLength))
+        else if((isBridgePacket) ||(isDevPacket))
         {                                               // is data for me? and have I received whole packet*/
                                                         //crc check*/
             Rxchecksum = Rxpacket[Rx_index + payloadlength -1];
-            Rxchecksum = ~Rxchecksum;
-            if(Rxchecksum == nrf24l0GetChecksum(&Rxpacket[Rx_index],packetLength))
+            //Rxchecksum = ~Rxchecksum;
+            if(Rxchecksum == nrf24l0GetChecksum(&Rxpacket[Rx_index],payloadlength-1))
             {
                 //Devices and Bridge can pop the data out and utilize it as needed
-
-                fn(&Rxpacket[Rx_index], size);                     // downlink data. Callback function */
+                size = payloadlength - META_DATA_SIZE;
+                fn(&Rxpacket[Rx_index + META_DATA_SIZE - 1], size);                     // downlink data. Callback function */
                 Rx_index = 0;
                 Rx_wrIndex = 0; // reset for next packet Rx
                 packetLength = 0;
+                Rx_index += payloadlength - 1;
             }
                                                         //reset the buffer. */ //Extra precaution
             for (i=0; i<sizeof(Rxpacket); i++){
@@ -822,16 +846,25 @@ uint8_t eepromGetDevInfo_DEV()
 uint8_t eepromSetGetDevInfo_BR(uint8_t *data)
 {
     int i=0;
+    int j = 0;
     uint8_t devNo = 0;
     uint8_t* ptr = (uint8_t*)NO_OF_DEV_IN_BRIDGE;
+    char str[30];
+    uint8_t mac[6] = {0};
 
     uint8_t noOfDev = (readEeprom(NO_OF_DEV_IN_BRIDGE) == 0xFF) ? 0 : readEeprom(NO_OF_DEV_IN_BRIDGE);
 
     for(i = 0; i < noOfDev; i++) {
         ptr = (uint8_t*)DEV1_MAC_START;
 
-        if(strncmp((char*)ptr,(char*)data,sizeof(myMac)) == 0) {
-            return *--ptr;
+        for(j = 0; j < 6; j++,ptr++){
+            mac[j] = readEeprom(ptr);
+        }
+
+        if(strncmp((char*)mac,(char*)data,sizeof(myMac)) == 0) {
+            ptr -= sizeof(myMac);
+            devNo = readEeprom(ptr);
+            return devNo;
         }
         ptr += 1 + sizeof(myMac);
     }
@@ -842,32 +875,19 @@ uint8_t eepromSetGetDevInfo_BR(uint8_t *data)
 
     --ptr;
     ++noOfDev;
-    writeEeprom((uint16_t)ptr,noOfDev);
-    devNo = readEeprom((uint16_t)ptr);
+    writeEeprom(ptr, noOfDev);
+    devNo = readEeprom(ptr);
     writeEeprom(NO_OF_DEV_IN_BRIDGE,devNo); /* store total no of devices */
     ++ptr;
 
-    /*mac*/
-//    uint32_t highAddrMac = 0;
-//
-//    for(i = 7; i >= 4 ; i-- ) {
-//        highAddrMac |= (data[i] << 8*(i-4));
-//    }
-//
-//    writeEeprom(ptr, highAddrMac);
-//    ptr+=4;
-//
-//    for(i = 3; i >= 0 ; i-- ) {
-//        lowAddrMac |= (data[i] << 8*(i));
-//    }
-//
-//    writeEeprom(ptr, lowAddrMac);
+    putsUart0("Dev No: -BR:  ");
+    snprintf(str, sizeof(str),"%u", devNo);
+    putsUart0(str);
+    putsUart0("\n");
 
-//    writeEeprom(ptr, data); //4bytes
-//    ptr += 4;
-//    writeEeprom(ptr, data);
-    for(i = 0; i < sizeof(myMac); i++) {
-        ptr[i] = data[i];
+    /*mac*/
+    for(i = 0; i < sizeof(myMac); i++,++ptr) {
+        writeEeprom(ptr, data[i]);
     }
 
     return devNo;
@@ -910,6 +930,11 @@ void cmdHandler(){ // change this later if necessary
                 writeNrfReg(W_REGISTER|CONFIG, 0x00); // Power down
                 waitMicrosecond(5000);
                 NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ;
+
+            }
+            if(strcmp(token, "debug") == 0){
+                debugMsg ^= true;
+                putsUart0("Debug messages ON");
             }
 
             if (strcmp(token, "full") == 0)
@@ -929,7 +954,7 @@ void cmdHandler(){ // change this later if necessary
     }
 }
 
-
+/*
 int main()
 {
     initSystemClockTo40Mhz();
@@ -939,10 +964,12 @@ int main()
     setUart0BaudRate(115200, 40e6);
     nrf24l0Init();
 
+    putsUart0("Device Powered up \n");
     // Flush Rx for device and bridge
-    uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
+    uint8_t data[] = {1,2,3,4,5,6}; // Random data, magic number change later
     enableSync_BR();
 
+   // writeEeprom(NO_OF_DEV_IN_BRIDGE, 0);
     while(true)
     {
         cmdHandler();
@@ -954,7 +981,7 @@ int main()
         //Common functions//
         nrf24l0RxMsg(dataReceived);
 
-        //check for slot no//
+        //check for slotNo no//
         if(txTimeStatus) // change later
         {
             if(sendJoinResponse_BR && downlinkSlotStart_br){
@@ -964,18 +991,19 @@ int main()
             else if(appSendFlag){ // Used by application layer for controlling transmissions
 
                     if(downlinkSlotStart_br){
-                        nrf24l0TxMsg(data,5, 0); // Magic number devno change later to use Tx buffer pointer
+                        nrf24l0TxMsg(data,sizeof(data), 0); // Magic number devno change later to use Tx buffer pointer
                     }
                     if(fastackSlotStart_br){
-                        nrf24l0TxMsg(data,5, 0); // Magic number devno change later to use Tx buffer pointer
+                        nrf24l0TxMsg(data,sizeof(data), 0); // Magic number devno change later to use Tx buffer pointer
                         appSendFlag = false;
                     }
             }
         }
     }
 }
+*/
 
-/*
+
 int main()
 {
     initSystemClockTo40Mhz();
@@ -985,9 +1013,9 @@ int main()
     setUart0BaudRate(115200, 40e6);
     nrf24l0Init();
 
-    uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
+    putsUart0("Device Powered up \n");
 
-    putsUart0("Device Initiated\n");
+    uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
 
     while(true)
         {
@@ -999,7 +1027,7 @@ int main()
         readNrfReg(R_REGISTER|FIFO_STATUS,&fifoStatus);
         nrf24l0RxMsg(dataReceived);
 
-        //check for slot no
+        //check for slotNo no
         if(txTimeStatus) // change later
         {
             if(nrfJoinEnabled && acessSlotStart_dev){
@@ -1007,13 +1035,14 @@ int main()
                 setPinValue(JOIN_LED,1);
                 }
             else if(appSendFlag && uplinkSlot_dev){ // Appsend flag is controlled by application layer.
-                    nrf24l0TxMsg(data,5, 0); // Magic number devno change later to use TxFIFO buffer pointer
+                    nrf24l0TxMsg(data,sizeof(data), 0); // Magic number devno change later to use TxFIFO buffer pointer
                     appSendFlag = false;
 
             }
         }
     }
 }
-*/
+
+
 
 

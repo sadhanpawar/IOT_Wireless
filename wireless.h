@@ -14,7 +14,7 @@
 
 //DATA transmission
 #define DATA_MAX_SIZE   (1500u)
-#define META_DATA_SIZE  (2+1+2+1)   //startcode + slot + len + checksum
+#define META_DATA_SIZE  (2+1+2+4+1)   //startcode + slot + remlen + devBitNum + checksum
 
 //EEPROM
 #define NO_OF_DEV_IN_BRIDGE     (10u)   /*1 word */
@@ -66,11 +66,20 @@
 #define _32BYTE_PACKETS         (47) // 1500/32 , 32 byte packets
 
 #define SYNC_SLOT   (0)
-#define DL_SLOT     (2) + GUARD_TIMER
+#define DL_SLOT     (2) + GUARD_TIMER + SYNC_SLOT
 #define FACK_SLOT   (50) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + DL_SLOT+ GUARD_TIMER
 #define ACCESS_SLOT (2) + FACK_SLOT + GUARD_TIMER
 #define UL0_SLOT    (50) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + ACCESS_SLOT + GUARD_TIMER
 #define UL1_SLOT    (50) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + UL0_SLOT + GUARD_TIMER
+
+//
+//#define SYNC_SLOT   (0)
+//#define DL_SLOT     502
+//#define FACK_SLOT   1026
+//#define ACCESS_SLOT 1528
+//#define UL0_SLOT    2030
+//#define UL1_SLOT    (15) +(TX_RX_DELAY_SLOT*_32BYTE_PACKETS) + UL0_SLOT + GUARD_TIMER
+
 
 //Extern variables
 
