@@ -495,11 +495,9 @@ void parsenrf24l01DataPacket(){
                    msgAcked = true;
                }
             }
-            else if(Rxpacket[Rx_index +2] == 3){ // Msg in ACCESS slotNo
+            else if((Rxpacket[Rx_index +2] == 3) && nrfJoinEnabled_BR ){ // Msg in ACCESS slotNo
                 isJoinPacket = true;
-                allocatedDevNum = eepromSetGetDevInfo_BR(&Rxpacket[Rx_index + 5]); // Send the Mac address of the Joined device and save it in list of devices in Bridge
-
-            }
+           }
             else if(Rxpacket[Rx_index +2] > 3){ // Msg in ACCESS slotNo
                 isBridgePacket = true; // Is this packet received by the Bridge
             }
@@ -577,8 +575,8 @@ bool isNrf24l0DataAvailable(void) // Check that data is available in Rx FIFO
 callback dataReceived(uint8_t *data, uint16_t size)
 {
     uint8_t i;
-    uint8_t buffer[32] = {0};
-    char str[32];
+    uint8_t buffer[40] = {0};
+    char str[40];
     putsUart0("data received to app layer\n");
     /*data copy*/
     for(i = 0; i < size; i++) {
@@ -832,8 +830,9 @@ void eepromSetDevInfo_DEV(uint8_t deviceNum)
 
     ptr = (uint8_t*)DEV1_MAC_START;
 
-    for(i = 0; i < sizeof(myMac); i++) {                                    // My Mac address
-        ptr[i] = myMac[i];
+    /*mac*/
+    for(i = 0; i < sizeof(myMac); i++,++ptr) {
+        writeEeprom(ptr, myMac[i]);
     }
 
 }
@@ -862,8 +861,12 @@ uint8_t eepromSetGetDevInfo_BR(uint8_t *data)
         }
 
         if(strncmp((char*)mac,(char*)data,sizeof(myMac)) == 0) {
-            ptr -= sizeof(myMac);
+            ptr -= (sizeof(myMac) + 1);
             devNo = readEeprom(ptr);
+            putsUart0("Existing Dev No: -BR:  ");
+            snprintf(str, sizeof(str),"%u", devNo);
+            putsUart0(str);
+            putsUart0("\n");
             return devNo;
         }
         ptr += 1 + sizeof(myMac);
@@ -1016,6 +1019,9 @@ int main()
     putsUart0("Device Powered up \n");
 
     uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
+
+    //writeEeprom(NO_OF_DEV_IN_BRIDGE,0);                         // Number of devices is 1
+    //writeEeprom(DEV1_NO_START,0);
 
     while(true)
         {
