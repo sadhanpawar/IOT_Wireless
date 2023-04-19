@@ -214,7 +214,7 @@ void uplinkSlot_DEV(){
     slotNo = eepromGetDevInfo_DEV() + 4;
     acessSlotStart_dev = false;
     uplinkSlot_dev = true; // Turn off after transmission
-
+    appSendFlag = true;
     //debug
     putsUart0("uplinkstart-D\n");
 }
@@ -1018,7 +1018,7 @@ int main()
 
     putsUart0("Device Powered up \n");
 
-    uint8_t data[] = {1,2,3,4,5}; // Random data, magic number change later
+    uint8_t data[] = {1,2,3,4,5,6,7}; // Random data, magic number change later
 
     //writeEeprom(NO_OF_DEV_IN_BRIDGE,0);                         // Number of devices is 1
     //writeEeprom(DEV1_NO_START,0);
@@ -1041,8 +1041,9 @@ int main()
                 setPinValue(JOIN_LED,1);
                 }
             else if(appSendFlag && uplinkSlot_dev){ // Appsend flag is controlled by application layer.
-                    nrf24l0TxMsg(data,sizeof(data), 0); // Magic number devno change later to use TxFIFO buffer pointer
+                    nrf24l0TxMsg(data,sizeof(data), 0xFFFFFFFF); // Magic number devno change later to use TxFIFO buffer pointer
                     appSendFlag = false;
+                    putsUart0("Uplink packet Sent\n");
 
             }
         }
