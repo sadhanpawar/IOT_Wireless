@@ -60,7 +60,7 @@
 
 //Slot Management Macros
 
-#define GUARD_TIMER             (50u) // ?? minimum is 1 ms
+#define GUARD_TIMER             (500u) // ?? minimum is 1 ms
 #define TX_RX_DELAY             (200u) // used by waitmicroseconds
 #define TX_RX_DELAY_SLOT        (0.2) //milliseconds
 #define _32BYTE_PACKETS         (47) // 1500/32 , 32 byte packets
@@ -121,7 +121,7 @@ extern bool sendJoinResponse_BR;
 // Declare external variables for uplinkSlot_dev, acessSlotStart_dev
 extern bool uplinkSlot_dev;
 extern bool acessSlotStart_dev;
-
+extern bool isJoinResp_dev;
 // Declare external variable for txTimeStatus
 extern bool txTimeStatus;
 

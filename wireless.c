@@ -52,6 +52,7 @@ bool timersStarted_br = false;
 
 bool acessSlotStart_dev = false;
 bool uplinkSlot_dev = false;
+bool isJoinResp_dev = false;
 
 bool txTimeStatus = false; // Its okay for you to transmit
 bool appSendFlag = false; // Flag for the application layer to send the data. Make it true to send data.
@@ -468,6 +469,7 @@ void parsenrf24l01DataPacket(){
 
 
     uint8_t deviceNum = 0;
+    uint32_t devBits = 0;
 
     if(strncmp((char*)&Rxpacket[Rx_wrIndex - payloadlength], (char*)syncMsg, sizeof(syncMsg) -2) == 0){ // check sync. Last byte for frame count is omitted
         isSync = true;
@@ -482,21 +484,44 @@ void parsenrf24l01DataPacket(){
         }
         else if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
             deviceNum = eepromGetDevInfo_DEV(); //Get device number stored in EEPROm. For already stored devices
-            packetLength = Rxpacket[Rx_index+ 4] << 8; // MSB
+
+            if(!nrfSyncEnabled && !nrfJoinEnabled ) { // check whether myDevice got an ACK
+                devBits = devBits | (Rxpacket[Rx_index +8] << 24);
+                devBits = devBits | (Rxpacket[Rx_index +7] << 16);
+                devBits = devBits | (Rxpacket[Rx_index +6] << 8);
+                devBits = devBits | (Rxpacket[Rx_index +5]);
+
+                if((devBits & (1 << deviceNum)) == 0 ) {
+                    return;
+                }
+
+                putsUart0("the packet is for me....\n");
+                if(Rxpacket[Rx_index +2] == 2){ // FACK slotNo
+                   msgAcked = true;
+
+                }
+            }
+
+            if(Rxpacket[Rx_index +4] != 0x80) {
+                packetLength = Rxpacket[Rx_index+ 4] << 8; // MSB
+            }
             packetLength |= Rxpacket[Rx_index +3];  // LSB
 
             if(Rxpacket[Rx_index + 2] == 1){ // DL slotNo
-                isDevPacket = true;
-                putsUart0("DL data received\n");
+
+                if(Rxpacket[Rx_index +4] == 0x80) {
+                    isJoinResp_dev = true;
+                } else {
+                    isDevPacket = true;
+                    putsUart0("DL data received\n");
+                }
                 /*Used in setting dev no in downlink slotNo */
             }
-            else if(Rxpacket[Rx_index +2] == 2){ // FACK slotNo
-               if( Rxpacket[Rx_index +5] == deviceNum){ // check whether myDevice got an ACK
-                   msgAcked = true;
-               }
-            }
             else if((Rxpacket[Rx_index +2] == 3) && nrfJoinEnabled_BR ){ // Msg in ACCESS slotNo
-                isJoinPacket = true;
+
+                if(Rxpacket[Rx_index +4] == 0x80) {
+                      isJoinPacket = true;
+                }
            }
             else if(Rxpacket[Rx_index +2] > 3){ // Msg in ACCESS slotNo
                 isBridgePacket = true; // Is this packet received by the Bridge
@@ -581,7 +606,7 @@ callback dataReceived(uint8_t *data, uint16_t size)
     /*data copy*/
     for(i = 0; i < size; i++) {
         buffer[i] = data[i];
-        snprintf(str,sizeof(str),"%u ",data[i]);
+        snprintf(str,sizeof(str),"%u ",buffer[i]);
         putsUart0(str);
     }
     putsUart0("\n");
@@ -617,6 +642,8 @@ void nrf24l0TxSync()
         stopTimer_ms(syncSlot_BR);
         startOneshotTimer_ms(syncSlot_BR, mySlotTemp);
         timersStarted_br = false;
+        Rx_index = 0;
+        Rx_wrIndex = 0;
        // setPinValue(SYNC_LED, 1);
     }
 }
@@ -626,7 +653,7 @@ void nrf24l0TxJoinReq_DEV()
     uint8_t joinBuffer[15] = {0};
     uint8_t* ptr = joinBuffer;
     uint8_t slotNo = 3; // Accessslot
-    uint16_t remlen = 1+sizeof(myMac);
+    uint16_t remlen = (1+sizeof(myMac)) | (0x8000) ;
 
     strncpy((char*)ptr,(char*)startCode,sizeof(startCode));
     ptr += sizeof(startCode);
@@ -651,7 +678,7 @@ void nrf24l0TxJoinResp_BR()
     uint8_t joinBuffer[10] = {0};
     uint8_t* ptr = joinBuffer;
     uint8_t slotNo = 1; // DL slotNo
-    uint16_t remlen = 1+1; //crc + dev no
+    uint16_t remlen = ((1+1) | 0x8000); //crc + dev no
 
     strncpy((char*)ptr,(char*)startCode,sizeof(startCode));
     ptr += sizeof(startCode);
@@ -741,13 +768,14 @@ void nrf24l0RxMsg(callback fn)
         {
             syncRxDevSlot();                   // Handle device sync slots
 
+            msgAcked = false;
             setPinValue(SYNC_LED,1);          // Toggle SYNC for each sync received
             waitMicrosecond(1000);
             setPinValue(SYNC_LED,0);
             putsUart0("SYNC-D\n");
         }
 
-        else if(nrfJoinEnabled && isDevPacket) //join response for dev
+        else if(nrfJoinEnabled && isJoinResp_dev) //join response for dev
         {
             putsUart0("joinresponse-D\n");
             snprintf(str, sizeof(str), "allocated dev no: %"PRIu8"\n",Rxpacket[Rx_index + 5]);
@@ -757,6 +785,7 @@ void nrf24l0RxMsg(callback fn)
             setPinValue(JOIN_LED,0);
             nrfJoinEnabled = false; // This is true from the moment dev sends a join req and receives a
             Rx_index += payloadlength - 1;
+            isJoinResp_dev = false;
         }
 
         else if(msgAcked) //check acks for my device //
