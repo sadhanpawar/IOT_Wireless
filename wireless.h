@@ -20,8 +20,8 @@
 #define NO_OF_DEV_IN_BRIDGE     (10u)   /*1 word */
 #define DEV1_NO_START           (14u)
 #define DEV1_MAC_START          (15u)
-#define DEV2_NO_START           (19u)
-#define DEV2_MAC_START          (20u)
+#define DEV2_NO_START           (21u)
+#define DEV2_MAC_START          (22u)
 
 //NRF Register addresses
 #define CONFIG      0x00

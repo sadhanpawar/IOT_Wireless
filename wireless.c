@@ -14,14 +14,14 @@
 #include "uart0.h"
 #include "wireless.h"
 
-
+bool isBridge = false;
 bool nrfSyncEnabled = false;
 bool nrfJoinEnabled = false;
 bool nrfJoinEnabled_BR = false;
 
 uint8_t syncMsg[7] = {0x55,0xAA,0x55,0xAA,0x55};
 uint8_t startCode[2] = {0xFE, 0xFE};
-uint8_t myMac[6] = {75,78,1,2,3,4};
+uint8_t myMac[6] = {75,78,1,2,3,5};
 
 uint8_t slotNo  = 0;
 uint16_t syncFrameCount = 0;
@@ -228,7 +228,13 @@ void syncRxDevSlot(){
     }
     else{
         uint32_t myUplinkSlot = getMySlot(eepromGetDevInfo_DEV()); // Get the time you have to wait for your slotNo
-        myUplinkSlot += GUARD_TIMER;
+        //myUplinkSlot += GUARD_TIMER;
+        char str[30];
+        snprintf(str, sizeof(str),"uplink slot time : %lu\n", myUplinkSlot);
+        putsUart0(str);
+        uint8_t mydev = eepromGetDevInfo_DEV();
+        snprintf(str, sizeof(str),"My dev no : %u\n", mydev);
+        putsUart0(str);
         stopTimer_ms(uplinkSlot_DEV);
         startOneshotTimer_ms(uplinkSlot_DEV, myUplinkSlot);
     }
@@ -353,6 +359,7 @@ void readNrfData(uint8_t *data)
 void enableSync_BR()
 {
     nrfSyncEnabled = true;
+    isBridge = true;
 }
 
 void enableJoin_DEV()
@@ -485,20 +492,19 @@ void parsenrf24l01DataPacket(){
         else if(strncmp((char*)&Rxpacket[Rx_index], (char*)startCode, sizeof(startCode)) == 0){ // check start code
             deviceNum = eepromGetDevInfo_DEV(); //Get device number stored in EEPROm. For already stored devices
 
-            if(!nrfSyncEnabled && !nrfJoinEnabled ) { // check whether myDevice got an ACK
+            if(!nrfJoinEnabled && !isBridge) { // check whether myDevice got an ACK
                 devBits = devBits | (Rxpacket[Rx_index +8] << 24);
                 devBits = devBits | (Rxpacket[Rx_index +7] << 16);
                 devBits = devBits | (Rxpacket[Rx_index +6] << 8);
                 devBits = devBits | (Rxpacket[Rx_index +5]);
 
-                if((devBits & (1 << deviceNum)) == 0 ) {
+                if( (devBits == 0xFFFFFFFF) || (devBits & (1 << deviceNum)) == 0 ) {
                     return;
                 }
 
                 putsUart0("the packet is for me....\n");
                 if(Rxpacket[Rx_index +2] == 2){ // FACK slotNo
                    msgAcked = true;
-
                 }
             }
 
@@ -881,9 +887,9 @@ uint8_t eepromSetGetDevInfo_BR(uint8_t *data)
     uint8_t mac[6] = {0};
 
     uint8_t noOfDev = (readEeprom(NO_OF_DEV_IN_BRIDGE) == 0xFF) ? 0 : readEeprom(NO_OF_DEV_IN_BRIDGE);
+    ptr = (uint8_t*)DEV1_MAC_START;
 
     for(i = 0; i < noOfDev; i++) {
-        ptr = (uint8_t*)DEV1_MAC_START;
 
         for(j = 0; j < 6; j++,ptr++){
             mac[j] = readEeprom(ptr);
@@ -982,6 +988,27 @@ void cmdHandler(){ // change this later if necessary
                 }
                 putsUart0("\n");
             }
+            if (strcmp(token, "reset") == 0)
+            {
+                token = strtok(NULL, " ");
+                if(strcmp(token, "inteeprom") == 0){
+                    for(i=0; i<readEeprom(NO_OF_DEV_IN_BRIDGE)*10; i++){
+                        writeEeprom(i + NO_OF_DEV_IN_BRIDGE , 0xFF); // Flash the eeprom
+
+                    }
+                    putsUart0("Cleared Internal Eeprom\n");
+                }
+            }
+
+            if (strcmp(token, "help") == 0)
+            {
+                putsUart0("push\n");
+                putsUart0("ping\n");
+                putsUart0("devCaps\n");
+                putsUart0("reboot\n");
+                putsUart0("debug on/off\n");
+                putsUart0("reset inteeprom\n");
+            }
         }
     }
 }
@@ -1052,8 +1079,15 @@ int main()
     //writeEeprom(NO_OF_DEV_IN_BRIDGE,0);                         // Number of devices is 1
     //writeEeprom(DEV1_NO_START,0);
 
+//    int i;
+//    for(i=0; i<10; i++){
+//        writeEeprom(i + NO_OF_DEV_IN_BRIDGE , 0xFF); // Flash the eeprom
+//
+//    }
+
     while(true)
         {
+
         cmdHandler();
 
     //Device functions
